@@ -1,11 +1,13 @@
 """POST /swap-hair: multi-stage donor-to-base hair transfer pipeline."""
 
 from io import BytesIO
+import json
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 
-from app.core.dependencies import get_master_pipeline
+from app.core.dependencies import get_app_settings, get_master_pipeline
+from app.core.settings import Settings
 from app.core.security import verify_api_key
 from app.pipeline.context import ProcessingContext
 from app.pipeline.master import MasterPipeline
@@ -31,6 +33,7 @@ async def swap_hair(
     base_image: UploadFile = File(..., description="Base bald user image"),
     donor_image: UploadFile = File(..., description="Celebrity/donor image"),
     pipeline: MasterPipeline = Depends(get_master_pipeline),
+    settings: Settings = Depends(get_app_settings),
     _: str = Depends(verify_api_key),
 ) -> StreamingResponse:
     _validate_content_type(base_image)
@@ -69,6 +72,11 @@ async def swap_hair(
         "blending": result.timings_ms.get("blending", 0.0),
     }
     total_ms = sum(stage_timings.values())
+    stage_details = _build_stage_details(
+        stage_timings=stage_timings,
+        selected_implementations=result.selected_implementations,
+        settings=settings,
+    )
     headers = {
         "Content-Disposition": 'inline; filename="hair-swap.png"',
         "X-Pipeline-Alignment": result.selected_implementations.get("alignment", ""),
@@ -82,6 +90,7 @@ async def swap_hair(
         "X-Pipeline-Ms-Harmonization": f"{stage_timings['harmonization']:.1f}",
         "X-Pipeline-Ms-Blending": f"{stage_timings['blending']:.1f}",
         "X-Pipeline-Ms-Total": f"{total_ms:.1f}",
+        "X-Pipeline-Stage-Details": json.dumps(stage_details, separators=(",", ":")),
         "X-Pipeline-Timings-Ms": ",".join(
             f"{name}:{value:.1f}" for name, value in result.timings_ms.items()
         ),
@@ -95,3 +104,35 @@ def _validate_content_type(image: UploadFile) -> None:
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Unsupported content type: {image.content_type}",
         )
+
+
+def _build_stage_details(
+    stage_timings: dict[str, float],
+    selected_implementations: dict[str, str],
+    settings: Settings,
+) -> list[dict[str, object]]:
+    model_map = {
+        "alignment": ["retinaface"],
+        "extraction": (
+            ["face_parser", "modnet"]
+            if settings.refine_hair_with_portrait_matte
+            else ["face_parser"]
+        ),
+        "warp": ["region_tps_math"] if settings.enable_region_aware_tps else ["tps_math"],
+        "harmonization": ["lab_color_transfer"],
+        "blending": (
+            ["laplacian_blend", "depth_estimator"]
+            if settings.enable_depth_occlusion
+            else ["laplacian_blend"]
+        ),
+    }
+    stage_order = ("alignment", "extraction", "warp", "harmonization", "blending")
+    return [
+        {
+            "stage": stage_name,
+            "implementation": selected_implementations.get(stage_name, ""),
+            "duration_ms": round(stage_timings.get(stage_name, 0.0), 3),
+            "models": model_map.get(stage_name, []),
+        }
+        for stage_name in stage_order
+    ]

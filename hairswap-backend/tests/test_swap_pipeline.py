@@ -7,6 +7,7 @@ from PIL import Image
 from app.bootstrap import create_app
 from app.core.dependencies import get_master_pipeline
 from app.pipeline.builder import build_default_registry
+from app.pipeline.contracts import HairRegions
 from app.pipeline.context import ProcessingContext
 from app.pipeline.master import MasterPipeline
 from app.pipeline.stages.warping import TpsWarpStage
@@ -113,6 +114,14 @@ def test_tps_warp_identity_shape() -> None:
         donor_hair_alpha=alpha,
         base_scalp_anchors=anchor,
         donor_scalp_anchors=anchor.copy(),
+        donor_regions_v2=HairRegions(
+            roots=np.ones((80, 80), dtype=np.float32),
+            forehead_line=np.zeros((80, 80), dtype=np.float32),
+            temples=np.zeros((80, 80), dtype=np.float32),
+            side_strands=np.zeros((80, 80), dtype=np.float32),
+            long_strands=np.ones((80, 80), dtype=np.float32),
+            shoulder_overlap=np.zeros((80, 80), dtype=np.float32),
+        ),
     )
     result = stage.process(context)
     assert result.warped_hair_rgb is not None

@@ -31,3 +31,5 @@ class InferenceRegistry:
     # multiplying with the portrait matte so stray hair-class predictions
     # outside the person silhouette get suppressed.
     modnet: LoadedOnnxModel | None = None
+    dense_landmarks: LoadedOnnxModel | None = None
+    depth: LoadedOnnxModel | None = None

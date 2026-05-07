@@ -23,6 +23,8 @@ def load_inference_registry() -> InferenceRegistry:
     face_parser_path = weights_dir / settings.face_parser_onnx_filename
     retinaface_path = weights_dir / settings.retinaface_onnx_filename
     modnet_path = weights_dir / settings.modnet_onnx_filename
+    dense_landmarks_path = weights_dir / settings.dense_landmark_onnx_filename
+    depth_path = weights_dir / settings.depth_onnx_filename
 
     if not face_parser_path.exists():
         raise FileNotFoundError(
@@ -46,10 +48,22 @@ def load_inference_registry() -> InferenceRegistry:
         if modnet_path.exists()
         else None
     )
+    dense_landmarks = (
+        wrap_loaded_model(create_inference_session(dense_landmarks_path, settings))
+        if dense_landmarks_path.exists()
+        else None
+    )
+    depth = (
+        wrap_loaded_model(create_inference_session(depth_path, settings))
+        if depth_path.exists()
+        else None
+    )
     return InferenceRegistry(
         face_parser=face_parser,
         retinaface=retinaface,
         modnet=modnet,
+        dense_landmarks=dense_landmarks,
+        depth=depth,
     )
 
 

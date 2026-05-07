@@ -1,10 +1,13 @@
 import cv2
 import numpy as np
 
+from app.debug.exporter import DebugExporter
 from app.core.model_registry import InferenceRegistry
 from app.core.settings import Settings
 from app.pipeline.context import ProcessingContext
 from app.pipeline.stages.base import AbstractPipelineStage
+from app.services.compositing import AnatomicalCompositor
+from app.services.depth import OptionalDepthEstimator
 
 
 class LaplacianBlendStage(AbstractPipelineStage):
@@ -13,6 +16,9 @@ class LaplacianBlendStage(AbstractPipelineStage):
     def __init__(self, models: InferenceRegistry, settings: Settings) -> None:
         _ = models
         self._settings = settings
+        self._compositor = AnatomicalCompositor()
+        self._depth = OptionalDepthEstimator()
+        self._debug = DebugExporter(settings.debug_export_enabled, settings.debug_export_dir)
 
     def process(self, context: ProcessingContext) -> ProcessingContext:
         if (
@@ -32,6 +38,22 @@ class LaplacianBlendStage(AbstractPipelineStage):
         hair = hair_rgb.astype(np.float32) / 255.0
         alpha = np.clip(context.warped_hair_alpha, 0.0, 1.0).astype(np.float32)
         alpha = self._prepare_alpha(alpha)
+        depth_map = self._depth.estimate(context.base_rgb) if self._settings.enable_depth_occlusion else None
+        if self._settings.enable_depth_occlusion and context.donor_regions_v2 is not None:
+            context.occlusion_metadata = self._compositor.build_occlusion(
+                context.base_rgb, alpha, context.donor_regions_v2, depth_map
+            )
+            alpha = self._compositor.apply_occlusion_to_alpha(alpha, context.occlusion_metadata)
+            if context.occlusion_metadata.depth_map is not None:
+                context.debug_artifacts.paths["depth_map"] = self._debug.write_mask(
+                    "depth_map", context.occlusion_metadata.depth_map
+                )
+            context.debug_artifacts.paths["occlusion_front"] = self._debug.write_mask(
+                "occlusion_front", context.occlusion_metadata.front_hair_mask
+            )
+            context.debug_artifacts.paths["occlusion_back"] = self._debug.write_mask(
+                "occlusion_back", context.occlusion_metadata.back_hair_mask
+            )
 
         shadow_alpha = self._contact_shadow(alpha)
         context.contact_shadow_alpha = shadow_alpha

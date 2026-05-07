@@ -113,6 +113,15 @@ class Settings(BaseSettings):
     hair_alpha_close_kernel: int = 5
     hair_alpha_core_min_opacity: float = 0.72
     hair_alpha_edge_gamma: float = 0.9
+    debug_export_enabled: bool = False
+    debug_export_dir: str = "debug/exports"
+    export_landmarks_json: bool = False
+    dense_landmark_backend: str = "heuristic68"
+    dense_landmark_onnx_filename: str = "dense_landmarks.onnx"
+    depth_onnx_filename: str = "depth_small.onnx"
+    enable_experimental_geometry: bool = False
+    enable_region_aware_tps: bool = False
+    enable_depth_occlusion: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="HAIRSWAP_")
 

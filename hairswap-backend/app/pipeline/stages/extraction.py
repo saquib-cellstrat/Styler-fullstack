@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 from app.core.model_registry import InferenceRegistry, LoadedOnnxModel
 from app.core.onnx_session import resolve_modnet_output_name
 from app.core.settings import Settings
+from app.pipeline.contracts import HairRegions
 from app.pipeline.context import AlphaMatte, ProcessingContext
 from app.pipeline.stages.base import AbstractPipelineStage
 from app.services.extraction.hair_parser import HairParser
@@ -54,7 +55,28 @@ class ModNetExtractionStage(AbstractPipelineStage):
             hair_alpha=hair_alpha,
             landmarks=context.donor_face.landmarks,
         )
+        context.donor_regions_v2 = self._decompose_regions_v2(hair_alpha)
         return context
+
+    def _decompose_regions_v2(self, hair_alpha: AlphaMatte) -> HairRegions:
+        h, w = hair_alpha.shape
+        y_grid, x_grid = np.indices((h, w), dtype=np.float32)
+        y_norm = y_grid / max(h - 1, 1)
+        x_norm = x_grid / max(w - 1, 1)
+        roots = ((y_norm < 0.32) * hair_alpha).astype(np.float32)
+        forehead_line = (((y_norm >= 0.30) & (y_norm < 0.42)) * hair_alpha).astype(np.float32)
+        temples = ((((x_norm < 0.23) | (x_norm > 0.77)) & (y_norm < 0.48)) * hair_alpha).astype(np.float32)
+        side_strands = ((((x_norm < 0.25) | (x_norm > 0.75)) & (y_norm >= 0.42)) * hair_alpha).astype(np.float32)
+        long_strands = ((y_norm >= 0.50) * hair_alpha).astype(np.float32)
+        shoulder_overlap = ((y_norm >= 0.70) * hair_alpha).astype(np.float32)
+        return HairRegions(
+            roots=np.clip(roots, 0.0, 1.0),
+            forehead_line=np.clip(forehead_line, 0.0, 1.0),
+            temples=np.clip(temples, 0.0, 1.0),
+            side_strands=np.clip(side_strands, 0.0, 1.0),
+            long_strands=np.clip(long_strands, 0.0, 1.0),
+            shoulder_overlap=np.clip(shoulder_overlap, 0.0, 1.0),
+        )
 
     def _decompose_regions(
         self,

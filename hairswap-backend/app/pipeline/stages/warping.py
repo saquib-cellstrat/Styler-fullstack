@@ -2,10 +2,12 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from app.debug.exporter import DebugExporter
 from app.core.model_registry import InferenceRegistry
 from app.core.settings import Settings
 from app.pipeline.context import ProcessingContext
 from app.pipeline.stages.base import AbstractPipelineStage
+from app.services.warping.region_tps import RegionAwareTpsWarper
 
 
 class TpsWarpStage(AbstractPipelineStage):
@@ -14,6 +16,8 @@ class TpsWarpStage(AbstractPipelineStage):
     def __init__(self, models: InferenceRegistry, settings: Settings) -> None:
         _ = models
         self._settings = settings
+        self._warper = RegionAwareTpsWarper()
+        self._debug = DebugExporter(settings.debug_export_enabled, settings.debug_export_dir)
 
     def process(self, context: ProcessingContext) -> ProcessingContext:
         if (
@@ -29,28 +33,41 @@ class TpsWarpStage(AbstractPipelineStage):
         donor_alpha = context.donor_hair_alpha
         base_h, base_w = context.base_rgb.shape[:2]
 
-        map_x, map_y = self._build_tps_maps(
-            source_points=context.donor_scalp_anchors,
-            target_points=context.base_scalp_anchors,
-            output_shape=(base_h, base_w),
-        )
-
-        warped_rgb = cv2.remap(
-            donor_rgb,
-            map_x,
-            map_y,
-            interpolation=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_CONSTANT,
-            borderValue=0,
-        )
-        warped_alpha = cv2.remap(
-            donor_alpha,
-            map_x,
-            map_y,
-            interpolation=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_CONSTANT,
-            borderValue=0.0,
-        )
+        if self._settings.enable_region_aware_tps and context.donor_regions_v2 is not None:
+            plan = self._warper.build_plan(
+                source_points=context.donor_scalp_anchors,
+                target_points=context.base_scalp_anchors,
+                regions=context.donor_regions_v2,
+                output_shape=(base_h, base_w),
+                regularization=self._settings.tps_regularization,
+            )
+            context.warp_plan = plan
+            warped_rgb, warped_alpha = self._warper.warp_rgba(donor_rgb, donor_alpha, plan)
+            context.debug_artifacts.paths["warp_stiffness"] = self._debug.write_mask(
+                "warp_stiffness", plan.stiffness_map
+            )
+        else:
+            map_x, map_y = self._build_tps_maps(
+                source_points=context.donor_scalp_anchors,
+                target_points=context.base_scalp_anchors,
+                output_shape=(base_h, base_w),
+            )
+            warped_rgb = cv2.remap(
+                donor_rgb,
+                map_x,
+                map_y,
+                interpolation=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0,
+            )
+            warped_alpha = cv2.remap(
+                donor_alpha,
+                map_x,
+                map_y,
+                interpolation=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0.0,
+            )
         warped_alpha = self._stabilize_warped_alpha(warped_alpha)
 
         context.warped_hair_rgb = np.clip(warped_rgb, 0, 255).astype(np.uint8)

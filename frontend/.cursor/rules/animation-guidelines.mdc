@@ -1,0 +1,27 @@
+---
+description: Motion standards for frontend animations and interactions.
+globs:
+  - frontend/**/*.{ts,tsx,css}
+alwaysApply: true
+---
+
+# Animation Guidelines Rule
+
+## Motion Philosophy
+- Motion communicates hierarchy and state; it should not be decorative noise.
+- Keep transitions smooth, restrained, and consistent with the Minimalist Modern style.
+
+## Approved Patterns
+- Entrance: subtle fade + translate-y (about 20-30px).
+- Hover: slight lift (`-translate-y-0.5` to `-translate-y-1`) with soft shadow increase.
+- Ambient loops: slow spin and gentle bob only for decorative hero elements.
+- Indicator pulse: low-amplitude pulse for status dots and section badges.
+
+## Timing and Easing
+- Standard interactions: about `200ms` ease-out.
+- Content reveals: about `700ms` with stagger for sibling items.
+- Continuous loops: slow cycles (`4s+` for bob, `60s+` for rotations).
+
+## Accessibility
+- Respect `prefers-reduced-motion` and provide non-animated fallbacks.
+- Do not use flashing, high-frequency blinking, or abrupt large movement.

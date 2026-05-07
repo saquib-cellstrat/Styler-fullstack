@@ -1,0 +1,27 @@
+---
+description: Enforce token-driven Minimalist Modern design system usage.
+globs:
+  - frontend/**/*.{ts,tsx,css}
+alwaysApply: true
+---
+
+# Design System Rule
+
+## Core Principles
+- Use semantic tokens from `frontend/app/globals.css`; do not hardcode one-off colors unless there is no matching token.
+- Favor reusable primitives from `frontend/components/ui/*` and layout primitives from `frontend/components/layout/*`.
+- Keep visual hierarchy intentional: display typography for large section headlines, Inter for UI/body, JetBrains Mono for compact labels.
+
+## Token Usage
+- Colors: use `background`, `foreground`, `muted`, `muted-foreground`, `accent`, `accent-secondary`, `border`, `ring`, `card`.
+- Effects: use shared radius and shadow scales; avoid introducing ad hoc radii and custom drop shadows.
+- Prefer gradient signature (`accent` to `accent-secondary`) for primary emphasis only.
+
+## Component Consistency
+- Reuse `Button`, `Card`, `Badge`, and `Input` variants before introducing bespoke class strings.
+- Keep controls accessible: visible focus ring, 44px+ targets, readable contrast.
+- Avoid nested card shells for page sections; reserve cards for repeated items or framed tool areas.
+
+## Responsiveness
+- Maintain stable layout dimensions at all breakpoints.
+- Preserve section rhythm through tokenized spacing and container constraints.

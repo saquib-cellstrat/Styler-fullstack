@@ -1,0 +1,28 @@
+---
+description: Frontend architecture guardrails for maintainable Next.js UI.
+globs:
+  - frontend/**/*.{ts,tsx}
+alwaysApply: true
+---
+
+# Frontend Architecture Rule
+
+## Layering
+- Route composition stays in `frontend/app/*`.
+- Shared visual primitives belong in `frontend/components/ui/*`.
+- Reusable layout scaffolding belongs in `frontend/components/layout/*`.
+- Shared helpers belong in `frontend/lib/*`.
+
+## Reuse and Naming
+- Use PascalCase component names and kebab-case filenames.
+- Prefer adding variants to existing primitives over creating near-duplicate components.
+- Keep public component APIs small and composable.
+
+## Styling Strategy
+- Tailwind utilities remain the primary styling mechanism.
+- Semantic tokens from global CSS are the source of truth.
+- Avoid copy-pasting long class strings across routes when a shared primitive or helper can absorb them.
+
+## Change Safety
+- Preserve existing route behavior and external link behavior during visual refactors.
+- Refactors should be incremental: primitives first, route migration second.

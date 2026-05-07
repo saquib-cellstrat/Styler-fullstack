@@ -1,0 +1,1 @@
+"""HairSwap backend application package."""

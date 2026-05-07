@@ -123,17 +123,64 @@ class ImageProcessor:
         )
         return np.clip(upscaled, 0.0, 1.0).astype(np.float32)
 
-    def compose_rgba(self, rgb: RgbImage, alpha: AlphaMatte) -> RgbaImage:
-        """Stack RGB + alpha (uint8) into a 4-channel RGBA image."""
+    def compose_rgba(
+        self,
+        rgb: RgbImage,
+        alpha: AlphaMatte,
+        zero_rgb_where_transparent: bool = True,
+    ) -> RgbaImage:
+        """Stack RGB + alpha (uint8) into a 4-channel RGBA image.
+
+        Zeroing the RGB channels where alpha is 0 dramatically improves PNG
+        compression (background becomes a solid-color region) without
+        affecting the rendered output - those pixels are invisible anyway.
+        """
         if rgb.shape[:2] != alpha.shape[:2]:
             raise ValueError("RGB/alpha shape mismatch")
         alpha_u8 = np.clip(alpha * 255.0, 0, 255).astype(np.uint8)
-        return np.dstack([rgb, alpha_u8])
+        rgb_out = rgb
+        if zero_rgb_where_transparent:
+            mask = alpha_u8 == 0
+            if mask.any():
+                rgb_out = rgb.copy()
+                rgb_out[mask] = 0
+        return np.dstack([rgb_out, alpha_u8])
 
-    def encode_png(self, rgba: RgbaImage) -> bytes:
+    def crop_to_alpha_bbox(
+        self,
+        rgba: RgbaImage,
+        alpha: AlphaMatte,
+        threshold: float,
+        padding_px: int,
+    ) -> tuple[RgbaImage, AlphaMatte, tuple[int, int, int, int] | None]:
+        """Crop an RGBA image and its alpha to the bounding box of visible alpha."""
+        mask = alpha > threshold
+        if not mask.any():
+            return rgba, alpha, None
+        ys, xs = np.where(mask)
+        h, w = alpha.shape[:2]
+        y1 = max(0, int(ys.min()) - padding_px)
+        y2 = min(h, int(ys.max()) + 1 + padding_px)
+        x1 = max(0, int(xs.min()) - padding_px)
+        x2 = min(w, int(xs.max()) + 1 + padding_px)
+        cropped_rgba = rgba[y1:y2, x1:x2]
+        cropped_alpha = alpha[y1:y2, x1:x2]
+        return cropped_rgba, cropped_alpha, (x1, y1, x2, y2)
+
+    def encode_png(
+        self,
+        rgba: RgbaImage,
+        compress_level: int = 6,
+        optimize: bool = False,
+    ) -> bytes:
         """Encode an RGBA uint8 image as a PNG byte string."""
         if rgba.ndim != 3 or rgba.shape[2] != 4:
             raise ValueError("Expected an RGBA image")
         buffer = BytesIO()
-        Image.fromarray(rgba, mode="RGBA").save(buffer, format="PNG", optimize=True)
+        Image.fromarray(rgba, mode="RGBA").save(
+            buffer,
+            format="PNG",
+            optimize=optimize,
+            compress_level=compress_level,
+        )
         return buffer.getvalue()

@@ -25,5 +25,9 @@ class LoadedOnnxModel:
 class InferenceRegistry:
     """All inference sessions needed for the hair extraction pipeline."""
 
-    modnet: LoadedOnnxModel
+    face_parser: LoadedOnnxModel
     retinaface: LoadedOnnxModel
+    # MODNet is optional: when present it refines the hair alpha by
+    # multiplying with the portrait matte so stray hair-class predictions
+    # outside the person silhouette get suppressed.
+    modnet: LoadedOnnxModel | None = None

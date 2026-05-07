@@ -1,8 +1,9 @@
 """ExtractionService tests using stub ONNX sessions.
 
 These tests exercise the real preprocessing/postprocessing path while
-substituting MODNet and RetinaFace with deterministic in-process stubs,
-so they don't require any ONNX weight files on disk.
+substituting the BiSeNet face parser, RetinaFace, and (optionally)
+MODNet with deterministic in-process stubs, so they don't require any
+ONNX weight files on disk.
 """
 
 from io import BytesIO
@@ -20,24 +21,31 @@ from app.services.extraction.quality_gate import (
 )
 
 
-class _StubModnetSession:
-    output_meta = ("alpha",)
+class _StubFaceParserSession:
+    """Returns BiSeNet-shaped logits with most probability mass on hair (17)
+    inside a centered circle."""
 
     def get_inputs(self) -> list[object]:
         return [type("I", (), {"name": "input", "shape": [1, 3, 512, 512]})()]
 
     def get_outputs(self) -> list[object]:
-        return [type("O", (), {"name": "alpha", "shape": [1, 1, 512, 512]})()]
+        return [
+            type("O", (), {"name": "output", "shape": [1, 19, 512, 512]})(),
+            type("O", (), {"name": "566", "shape": [1, 19, 512, 512]})(),
+            type("O", (), {"name": "576", "shape": [1, 19, 512, 512]})(),
+        ]
 
     def run(self, output_names, feed) -> list[np.ndarray]:
         h, w = 512, 512
-        alpha = np.zeros((1, 1, h, w), dtype=np.float32)
+        logits = np.full((1, 19, h, w), -5.0, dtype=np.float32)
+        logits[:, 0] = 5.0  # default class = background
         cy, cx = h // 2, w // 2
-        radius = h // 4
+        radius = h // 3
         ys, xs = np.ogrid[:h, :w]
-        mask = (ys - cy) ** 2 + (xs - cx) ** 2 <= radius**2
-        alpha[0, 0][mask] = 1.0
-        return [alpha]
+        hair_mask = (ys - cy) ** 2 + (xs - cx) ** 2 <= radius**2
+        logits[0, 17][hair_mask] = 8.0
+        logits[0, 0][hair_mask] = -5.0
+        return [logits, logits, logits]
 
 
 class _StubRetinaFaceSession:
@@ -115,17 +123,19 @@ class _StubRetinaFaceSession:
 
 def _make_registry() -> InferenceRegistry:
     s = get_settings()
-    modnet = LoadedOnnxModel(
-        session=_StubModnetSession(),  # type: ignore[arg-type]
+    face_parser = LoadedOnnxModel(
+        session=_StubFaceParserSession(),  # type: ignore[arg-type]
         input_names=("input",),
-        output_names=("alpha",),
+        output_names=("output", "566", "576"),
     )
     retinaface = LoadedOnnxModel(
         session=_StubRetinaFaceSession(s.retinaface_input_size),  # type: ignore[arg-type]
         input_names=("input0",),
         output_names=("loc", "conf", "land"),
     )
-    return InferenceRegistry(modnet=modnet, retinaface=retinaface)
+    return InferenceRegistry(
+        face_parser=face_parser, retinaface=retinaface, modnet=None
+    )
 
 
 def _png_bytes(width: int = 512, height: int = 512) -> bytes:
@@ -187,12 +197,13 @@ def test_quality_gate_rejects_nonfrontal_face() -> None:
     s = get_settings()
     registry = _make_registry()
     registry = InferenceRegistry(
-        modnet=registry.modnet,
+        face_parser=registry.face_parser,
         retinaface=LoadedOnnxModel(
             session=TurnedFaceSession(s.retinaface_input_size),  # type: ignore[arg-type]
             input_names=("input0",),
             output_names=("loc", "conf", "land"),
         ),
+        modnet=registry.modnet,
     )
     service = ExtractionService(registry=registry, settings=s)
     with pytest.raises(NonFrontalFaceError):
@@ -210,12 +221,13 @@ def test_quality_gate_rejects_when_no_face_detected() -> None:
     s = get_settings()
     registry = _make_registry()
     registry = InferenceRegistry(
-        modnet=registry.modnet,
+        face_parser=registry.face_parser,
         retinaface=LoadedOnnxModel(
             session=NoFaceSession(s.retinaface_input_size),  # type: ignore[arg-type]
             input_names=("input0",),
             output_names=("loc", "conf", "land"),
         ),
+        modnet=registry.modnet,
     )
     service = ExtractionService(registry=registry, settings=s)
     with pytest.raises(NoFaceFoundError):

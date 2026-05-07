@@ -2,10 +2,11 @@
 
 from fastapi import FastAPI
 
-from app.api.v1.endpoints import extraction
+from app.api.v1.endpoints import extraction, swap_hair
 from app.core.settings import get_settings
 
 
 def include_v1_endpoints(app: FastAPI) -> None:
     settings = get_settings()
     app.include_router(extraction.router, prefix=settings.api_prefix)
+    app.include_router(swap_hair.router, prefix=settings.api_prefix)

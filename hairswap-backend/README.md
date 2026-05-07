@@ -14,8 +14,14 @@ uv run fastapi dev app/main.py
 ```
 
 The dev server listens on `http://127.0.0.1:8000` and the OpenAPI docs
-are available at `/docs`. All endpoints require the `X-Api-Key` header
-(defaults to `change-me`; override with `HAIRSWAP_API_KEY=...`).
+are available at `/docs`. The service is unauthenticated by default so
+it works as a fully local in-process tool. To enforce the `X-Api-Key`
+header, set:
+
+```bash
+HAIRSWAP_API_KEY_REQUIRED=true HAIRSWAP_API_KEY=your-secret \
+uv run fastapi dev app/main.py
+```
 
 ## Endpoints
 
@@ -27,10 +33,11 @@ are available at `/docs`. All endpoints require the `X-Api-Key` header
 | `POST` | `/api/v1/pipeline/blend` | Stub for the future blending stage. |
 
 `POST /api/v1/extract-hair` decodes the upload, runs a RetinaFace ONNX
-quality gate (rejects non-frontal donors with HTTP 422), runs MODNet to
-produce a portrait alpha matte, and streams a 4-channel RGBA PNG back to
-the caller. The response includes the diagnostic headers `X-Face-Score`
-and `X-Face-Yaw-Deg`.
+quality gate (rejects non-frontal donors with HTTP 422), runs a
+CelebAMask-HQ BiSeNet face parser to produce a **hair-only** soft alpha
+matte (class 17, optionally combined with class 18 = hat), and streams a
+4-channel RGBA PNG back to the caller. The response includes the
+diagnostic headers `X-Face-Score` and `X-Face-Yaw-Deg`.
 
 ## Required ONNX weights
 

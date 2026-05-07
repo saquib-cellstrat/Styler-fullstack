@@ -31,6 +31,7 @@ class LaplacianBlendStage(AbstractPipelineStage):
         assert hair_rgb is not None
         hair = hair_rgb.astype(np.float32) / 255.0
         alpha = np.clip(context.warped_hair_alpha, 0.0, 1.0).astype(np.float32)
+        alpha = self._prepare_alpha(alpha)
 
         shadow_alpha = self._contact_shadow(alpha)
         context.contact_shadow_alpha = shadow_alpha
@@ -75,6 +76,15 @@ class LaplacianBlendStage(AbstractPipelineStage):
             size = (blended_levels[idx].shape[1], blended_levels[idx].shape[0])
             output = cv2.pyrUp(output, dstsize=size) + blended_levels[idx]
         return np.clip(output, 0.0, 1.0)
+
+    @staticmethod
+    def _prepare_alpha(alpha: np.ndarray) -> np.ndarray:
+        alpha = np.clip(alpha, 0.0, 1.0).astype(np.float32)
+        alpha_u8 = (alpha * 255.0).astype(np.uint8)
+        alpha_u8 = cv2.medianBlur(alpha_u8, 5)
+        softened = cv2.GaussianBlur(alpha_u8.astype(np.float32) / 255.0, (0, 0), sigmaX=1.0, sigmaY=1.0)
+        softened = np.where(softened > 0.55, np.maximum(softened, 0.82), softened)
+        return np.clip(softened, 0.0, 1.0).astype(np.float32)
 
     def _contact_shadow(self, alpha: np.ndarray) -> np.ndarray:
         kernel = np.ones((9, 9), dtype=np.uint8)

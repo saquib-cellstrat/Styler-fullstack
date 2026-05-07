@@ -51,6 +51,7 @@ class TpsWarpStage(AbstractPipelineStage):
             borderMode=cv2.BORDER_CONSTANT,
             borderValue=0.0,
         )
+        warped_alpha = self._stabilize_warped_alpha(warped_alpha)
 
         context.warped_hair_rgb = np.clip(warped_rgb, 0, 255).astype(np.uint8)
         context.warped_hair_alpha = np.clip(warped_alpha, 0.0, 1.0).astype(np.float32)
@@ -110,3 +111,14 @@ class TpsWarpStage(AbstractPipelineStage):
         diff = a[:, None, :] - b[None, :, :]
         r2 = np.sum(diff * diff, axis=2, dtype=np.float64)
         return r2 * np.log(r2 + 1e-6)
+
+    @staticmethod
+    def _stabilize_warped_alpha(alpha: NDArray[np.float32]) -> NDArray[np.float32]:
+        alpha = np.clip(alpha, 0.0, 1.0).astype(np.float32)
+        alpha_u8 = (alpha * 255.0).astype(np.uint8)
+        close_kernel = np.ones((5, 5), dtype=np.uint8)
+        closed = cv2.morphologyEx(alpha_u8, cv2.MORPH_CLOSE, close_kernel)
+        feather = cv2.GaussianBlur(closed.astype(np.float32) / 255.0, (0, 0), sigmaX=1.2, sigmaY=1.2)
+        core = cv2.erode((feather > 0.4).astype(np.uint8), close_kernel, iterations=1) > 0
+        feather = np.where(core, np.maximum(feather, 0.78), feather)
+        return np.clip(feather, 0.0, 1.0).astype(np.float32)

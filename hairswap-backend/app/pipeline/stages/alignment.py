@@ -25,17 +25,31 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
 
         context.base_face = self._gate.evaluate(context.base_rgb)
         context.donor_face = self._gate.evaluate(context.donor_rgb)
-        context.base_scalp_anchors = self._build_scalp_anchors(context.base_face.landmarks)
-        context.donor_scalp_anchors = self._build_scalp_anchors(context.donor_face.landmarks)
+        context.base_scalp_anchors = self._build_scalp_anchors(
+            context.base_face.landmarks,
+            context.base_face.box,
+            context.base_rgb.shape[:2],
+        )
+        context.donor_scalp_anchors = self._build_scalp_anchors(
+            context.donor_face.landmarks,
+            context.donor_face.box,
+            context.donor_rgb.shape[:2],
+        )
         return context
 
     @staticmethod
-    def _build_scalp_anchors(landmarks: np.ndarray) -> np.ndarray:
+    def _build_scalp_anchors(
+        landmarks: np.ndarray,
+        face_box: tuple[float, float, float, float],
+        image_shape: tuple[int, int],
+    ) -> np.ndarray:
         left_eye = landmarks[0]
         right_eye = landmarks[1]
         nose = landmarks[2]
         mouth_left = landmarks[3]
         mouth_right = landmarks[4]
+        x1, y1, x2, y2 = face_box
+        face_h = max(1.0, y2 - y1)
         eye_mid = (left_eye + right_eye) / 2.0
         eye_vec = right_eye - left_eye
         eye_dist = float(np.linalg.norm(eye_vec)) or 1.0
@@ -54,10 +68,30 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
         left_temple = left_eye + local_up * (0.55 * eye_dist)
         right_temple = right_eye + local_up * (0.55 * eye_dist)
         fringe_center = eye_mid + local_up * (0.75 * eye_dist)
-        left_side = mouth_left + np.array([-0.4 * eye_dist, -0.3 * eye_dist], dtype=np.float32)
-        right_side = mouth_right + np.array([0.4 * eye_dist, -0.3 * eye_dist], dtype=np.float32)
+        # Keep lower anchors soft and landmark-driven; hard jaw/chin anchors
+        # can over-constrain TPS and cause visible cheek artifacts.
+        mouth_center = (mouth_left + mouth_right) / 2.0
+        left_side = mouth_left + np.array([-0.25 * eye_dist, -0.15 * eye_dist], dtype=np.float32)
+        right_side = mouth_right + np.array([0.25 * eye_dist, -0.15 * eye_dist], dtype=np.float32)
+        left_cheek = mouth_left + np.array([-0.35 * eye_dist, -0.45 * eye_dist], dtype=np.float32)
+        right_cheek = mouth_right + np.array([0.35 * eye_dist, -0.45 * eye_dist], dtype=np.float32)
+        lower_center = np.array([mouth_center[0], y1 + face_h * 0.88], dtype=np.float32)
 
         anchors = np.vstack(
-            [left_temple, fringe_center, right_temple, crown, nose, left_side, right_side]
+            [
+                left_temple,
+                fringe_center,
+                right_temple,
+                crown,
+                nose,
+                left_side,
+                right_side,
+                left_cheek,
+                right_cheek,
+                lower_center,
+            ]
         ).astype(np.float32)
+        h, w = image_shape
+        anchors[:, 0] = np.clip(anchors[:, 0], 0.0, float(w - 1))
+        anchors[:, 1] = np.clip(anchors[:, 1], 0.0, float(h - 1))
         return anchors

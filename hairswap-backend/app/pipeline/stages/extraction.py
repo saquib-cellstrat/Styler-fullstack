@@ -41,6 +41,7 @@ class ModNetExtractionStage(AbstractPipelineStage):
             hair_alpha = np.clip(
                 hair_alpha * self._settings.hair_alpha_gain, 0.0, 1.0
             ).astype(np.float32)
+        hair_alpha = self._stabilize_hair_alpha(hair_alpha)
 
         donor_hair_rgba = self._image_processor.compose_rgba(
             donor_rgb,
@@ -80,6 +81,24 @@ class ModNetExtractionStage(AbstractPipelineStage):
             "fringe": fringe_mask,
             "sides": sides_mask,
         }
+
+    def _stabilize_hair_alpha(self, alpha: AlphaMatte) -> AlphaMatte:
+        kernel_size = max(3, int(self._settings.hair_alpha_close_kernel))
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+        alpha_u8 = np.clip(alpha * 255.0, 0.0, 255.0).astype(np.uint8)
+        closed = cv2.morphologyEx(alpha_u8, cv2.MORPH_CLOSE, kernel)
+        closed_f = closed.astype(np.float32) / 255.0
+        stabilized = np.maximum(alpha, closed_f)
+
+        core_mask = cv2.erode((stabilized > 0.35).astype(np.uint8), kernel, iterations=1) > 0
+        core_floor = float(self._settings.hair_alpha_core_min_opacity)
+        stabilized = np.where(core_mask, np.maximum(stabilized, core_floor), stabilized)
+
+        gamma = max(0.5, float(self._settings.hair_alpha_edge_gamma))
+        stabilized = np.power(np.clip(stabilized, 0.0, 1.0), gamma).astype(np.float32)
+        return np.clip(stabilized, 0.0, 1.0).astype(np.float32)
 
     def _refine_with_modnet(
         self,

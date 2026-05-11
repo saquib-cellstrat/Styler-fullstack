@@ -43,7 +43,15 @@ class LabColorTransferStage(AbstractPipelineStage):
             transformed[..., channel_idx] = np.where(mask, adjusted, channel)
 
         harmonized = cv2.cvtColor(np.clip(transformed, 0.0, 255.0).astype(np.uint8), cv2.COLOR_LAB2RGB)
-        context.harmonized_hair_rgb = harmonized
+        alpha = np.clip(context.warped_hair_alpha.astype(np.float32), 0.0, 1.0)
+        edge_weight = np.clip((0.85 - alpha) / 0.85, 0.0, 1.0)
+        blend_weight = np.power(edge_weight, 0.8).astype(np.float32)
+        original = context.warped_hair_rgb.astype(np.float32)
+        adjusted = harmonized.astype(np.float32)
+        mixed = (adjusted * blend_weight[..., None]) + (
+            original * (1.0 - blend_weight[..., None])
+        )
+        context.harmonized_hair_rgb = np.clip(mixed, 0.0, 255.0).astype(np.uint8)
         return context
 
     @staticmethod

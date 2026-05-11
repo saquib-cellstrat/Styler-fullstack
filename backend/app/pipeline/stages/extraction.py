@@ -43,9 +43,12 @@ class ModNetExtractionStage(AbstractPipelineStage):
                 hair_alpha * self._settings.hair_alpha_gain, 0.0, 1.0
             ).astype(np.float32)
         hair_alpha = self._stabilize_hair_alpha(hair_alpha)
+        # Remove low-alpha donor background colors to avoid white halo contamination downstream.
+        donor_rgb_clean = donor_rgb.copy()
+        donor_rgb_clean[hair_alpha < 0.14] = 0
 
         donor_hair_rgba = self._image_processor.compose_rgba(
-            donor_rgb,
+            donor_rgb_clean,
             hair_alpha,
             zero_rgb_where_transparent=self._settings.zero_rgb_where_transparent,
         )
@@ -55,20 +58,51 @@ class ModNetExtractionStage(AbstractPipelineStage):
             hair_alpha=hair_alpha,
             landmarks=context.donor_face.landmarks,
         )
-        context.donor_regions_v2 = self._decompose_regions_v2(hair_alpha)
+        context.donor_regions_v2 = self._decompose_regions_v2(
+            hair_alpha=hair_alpha,
+            landmarks=context.donor_face.landmarks,
+            face_box=context.donor_face.box,
+        )
         return context
 
-    def _decompose_regions_v2(self, hair_alpha: AlphaMatte) -> HairRegions:
+    def _decompose_regions_v2(
+        self,
+        hair_alpha: AlphaMatte,
+        landmarks: NDArray[np.float32],
+        face_box: tuple[float, float, float, float],
+    ) -> HairRegions:
         h, w = hair_alpha.shape
         y_grid, x_grid = np.indices((h, w), dtype=np.float32)
-        y_norm = y_grid / max(h - 1, 1)
-        x_norm = x_grid / max(w - 1, 1)
-        roots = ((y_norm < 0.32) * hair_alpha).astype(np.float32)
-        forehead_line = (((y_norm >= 0.30) & (y_norm < 0.42)) * hair_alpha).astype(np.float32)
-        temples = ((((x_norm < 0.23) | (x_norm > 0.77)) & (y_norm < 0.48)) * hair_alpha).astype(np.float32)
-        side_strands = ((((x_norm < 0.25) | (x_norm > 0.75)) & (y_norm >= 0.42)) * hair_alpha).astype(np.float32)
-        long_strands = ((y_norm >= 0.50) * hair_alpha).astype(np.float32)
-        shoulder_overlap = ((y_norm >= 0.70) * hair_alpha).astype(np.float32)
+        left_eye = landmarks[0]
+        right_eye = landmarks[1]
+        eye_mid_y = float((left_eye[1] + right_eye[1]) * 0.5)
+        x1, y1, x2, y2 = face_box
+        face_h = max(1.0, y2 - y1)
+        face_w = max(1.0, x2 - x1)
+
+        # Use face-relative coordinates to avoid region drift in off-center crops.
+        face_x = np.clip((x_grid - float(x1)) / face_w, -0.5, 1.5)
+        face_y = np.clip((y_grid - float(y1)) / face_h, -0.5, 2.0)
+        left_x = float(min(left_eye[0], right_eye[0]))
+        right_x = float(max(left_eye[0], right_eye[0]))
+        side_gate = (x_grid < left_x) | (x_grid > right_x)
+
+        roots = (((face_y <= 0.20) | (y_grid < eye_mid_y - 0.06 * face_h)) * hair_alpha).astype(
+            np.float32
+        )
+        forehead_line = (
+            ((face_y > 0.16) & (face_y <= 0.42) & (y_grid < eye_mid_y + 0.05 * face_h)) * hair_alpha
+        ).astype(np.float32)
+        temples = (
+            (side_gate & (face_y >= 0.10) & (face_y <= 0.52) & ((face_x < 0.26) | (face_x > 0.74)))
+            * hair_alpha
+        ).astype(np.float32)
+        side_strands = (
+            (side_gate & (face_y > 0.46) & (face_y <= 1.10) & ((face_x < 0.28) | (face_x > 0.72)))
+            * hair_alpha
+        ).astype(np.float32)
+        long_strands = ((face_y > 0.88) * hair_alpha).astype(np.float32)
+        shoulder_overlap = ((face_y > 1.08) * hair_alpha).astype(np.float32)
         return HairRegions(
             roots=np.clip(roots, 0.0, 1.0),
             forehead_line=np.clip(forehead_line, 0.0, 1.0),
@@ -117,9 +151,19 @@ class ModNetExtractionStage(AbstractPipelineStage):
         core_mask = cv2.erode((stabilized > 0.35).astype(np.uint8), kernel, iterations=1) > 0
         core_floor = float(self._settings.hair_alpha_core_min_opacity)
         stabilized = np.where(core_mask, np.maximum(stabilized, core_floor), stabilized)
+        interior_mask = cv2.erode((closed_f > 0.30).astype(np.uint8), kernel, iterations=1) > 0
+        interior_floor = max(0.56, core_floor * 0.85)
+        stabilized = np.where(
+            interior_mask,
+            np.maximum(stabilized, interior_floor),
+            stabilized,
+        )
 
         gamma = max(0.5, float(self._settings.hair_alpha_edge_gamma))
-        stabilized = np.power(np.clip(stabilized, 0.0, 1.0), gamma).astype(np.float32)
+        gamma_adjusted = np.power(np.clip(stabilized, 0.0, 1.0), gamma).astype(np.float32)
+        # Keep matte edge shaping from gamma, but do not dim the opaque interior.
+        stabilized = np.where(core_mask, stabilized, gamma_adjusted).astype(np.float32)
+        stabilized = np.where(stabilized > 0.96, 1.0, stabilized).astype(np.float32)
         return np.clip(stabilized, 0.0, 1.0).astype(np.float32)
 
     def _refine_with_modnet(

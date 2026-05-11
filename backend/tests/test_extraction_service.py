@@ -155,6 +155,14 @@ def test_extraction_returns_rgba_with_alpha_matte() -> None:
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def test_extraction_zeroes_low_alpha_rgb_to_reduce_halo() -> None:
+    service = ExtractionService(registry=_make_registry(), settings=get_settings())
+    result = service.process(_png_bytes())
+    low_alpha = result.alpha < 0.14
+    if np.any(low_alpha):
+        assert np.all(result.rgba[..., :3][low_alpha] == 0)
+
+
 def test_extraction_rejects_empty_payload() -> None:
     service = ExtractionService(registry=_make_registry(), settings=get_settings())
     with pytest.raises(ValueError):

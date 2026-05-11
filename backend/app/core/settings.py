@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     portrait_gate_high: float = 0.20
     # Multiplicative gain applied to the hair softmax so confident hair
     # pixels reach full opacity. Small values preserve soft tip edges.
-    hair_alpha_gain: float = 1.15
+    hair_alpha_gain: float = 1.30
 
     # Run face parsing on a crop around the detected face (much higher
     # effective resolution than letterboxing the full image) and paste
@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     contact_shadow_opacity: float = 0.15
     contact_shadow_blur_sigma: float = 5.0
     hair_alpha_close_kernel: int = 5
-    hair_alpha_core_min_opacity: float = 0.72
+    hair_alpha_core_min_opacity: float = 0.84
     hair_alpha_edge_gamma: float = 0.9
     debug_export_enabled: bool = False
     debug_export_dir: str = "debug/exports"

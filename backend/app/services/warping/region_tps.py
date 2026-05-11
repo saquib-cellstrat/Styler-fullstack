@@ -59,7 +59,22 @@ class RegionAwareTpsWarper:
         return np.clip(stiff, 0.0, 1.0).astype(np.float32)
 
     def _region_labels(self, n: int) -> list[str]:
-        labels = ["roots", "forehead_line", "temples", "temples", "side_strands", "side_strands", "long_strands", "long_strands", "shoulder_overlap", "roots"]
+        labels = [
+            "roots",
+            "forehead_line",
+            "temples",
+            "roots",
+            "forehead_line",
+            "side_strands",
+            "side_strands",
+            "side_strands",
+            "side_strands",
+            "long_strands",
+            "long_strands",
+            "shoulder_overlap",
+            "shoulder_overlap",
+            "long_strands",
+        ]
         if n <= len(labels):
             return labels[:n]
         return labels + ["long_strands"] * (n - len(labels))

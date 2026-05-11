@@ -113,10 +113,14 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
         )
         local_up = rot @ up
 
-        # Skull-aware anchor placement: combine eye distance + detected face box.
-        scalp_lift = max(0.52 * eye_dist, 0.28 * face_h)
+        # Keep crown lift bounded to avoid elongated head silhouettes.
+        scalp_lift = float(
+            np.clip(max(0.40 * eye_dist, 0.20 * face_h), 0.16 * face_h, 0.24 * face_h)
+        )
         crown = eye_mid + local_up * scalp_lift
-        temple_lift = max(0.20 * eye_dist, 0.10 * face_h)
+        temple_lift = float(
+            np.clip(max(0.16 * eye_dist, 0.08 * face_h), 0.06 * face_h, 0.13 * face_h)
+        )
         left_temple = np.array(
             [x1 + 0.16 * face_w, left_eye[1]], dtype=np.float32
         ) + local_up * temple_lift
@@ -139,6 +143,18 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
         right_cheek = np.array(
             [x2 - 0.20 * face_w, y1 + 0.58 * face_h], dtype=np.float32
         )
+        jaw_left = np.array(
+            [x1 + 0.15 * face_w, y1 + 0.82 * face_h], dtype=np.float32
+        )
+        jaw_right = np.array(
+            [x2 - 0.15 * face_w, y1 + 0.82 * face_h], dtype=np.float32
+        )
+        sideburn_left = np.array(
+            [x1 + 0.10 * face_w, y1 + 0.62 * face_h], dtype=np.float32
+        )
+        sideburn_right = np.array(
+            [x2 - 0.10 * face_w, y1 + 0.62 * face_h], dtype=np.float32
+        )
         lower_center = np.array([mouth_center[0], y1 + face_h * 0.88], dtype=np.float32)
 
         anchors = np.vstack(
@@ -150,8 +166,12 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
                 nose,
                 left_side,
                 right_side,
+                sideburn_left,
+                sideburn_right,
                 left_cheek,
                 right_cheek,
+                jaw_left,
+                jaw_right,
                 lower_center,
             ]
         ).astype(np.float32)

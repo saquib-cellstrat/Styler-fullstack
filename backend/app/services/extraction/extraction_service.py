@@ -15,6 +15,7 @@ Pipeline:
 import time
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 
@@ -86,10 +87,14 @@ class ExtractionService(PipelineStage[bytes, ExtractionResult]):
         gain = self.settings.hair_alpha_gain
         if gain != 1.0:
             alpha = np.clip(alpha * gain, 0.0, 1.0).astype(np.float32)
+        alpha = self._stabilize_hair_alpha(alpha)
         t_refine = time.perf_counter()
 
+        rgb_clean = rgb.copy()
+        rgb_clean[alpha < 0.14] = 0
+
         rgba = self.image_processor.compose_rgba(
-            rgb,
+            rgb_clean,
             alpha,
             zero_rgb_where_transparent=self.settings.zero_rgb_where_transparent,
         )
@@ -167,6 +172,33 @@ class ExtractionService(PipelineStage[bytes, ExtractionResult]):
         while alpha.ndim > 2:
             alpha = np.squeeze(alpha, axis=0)
         return np.clip(alpha, 0.0, 1.0).astype(np.float32)
+
+    def _stabilize_hair_alpha(self, alpha: AlphaMatte) -> AlphaMatte:
+        kernel_size = max(3, int(self.settings.hair_alpha_close_kernel))
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+        alpha_u8 = np.clip(alpha * 255.0, 0.0, 255.0).astype(np.uint8)
+        closed = cv2.morphologyEx(alpha_u8, cv2.MORPH_CLOSE, kernel)
+        closed_f = closed.astype(np.float32) / 255.0
+        stabilized = np.maximum(alpha, closed_f)
+
+        core_mask = cv2.erode((stabilized > 0.35).astype(np.uint8), kernel, iterations=1) > 0
+        core_floor = float(self.settings.hair_alpha_core_min_opacity)
+        stabilized = np.where(core_mask, np.maximum(stabilized, core_floor), stabilized)
+        interior_mask = cv2.erode((closed_f > 0.30).astype(np.uint8), kernel, iterations=1) > 0
+        interior_floor = max(0.56, core_floor * 0.85)
+        stabilized = np.where(
+            interior_mask,
+            np.maximum(stabilized, interior_floor),
+            stabilized,
+        )
+
+        gamma = max(0.5, float(self.settings.hair_alpha_edge_gamma))
+        gamma_adjusted = np.power(np.clip(stabilized, 0.0, 1.0), gamma).astype(np.float32)
+        stabilized = np.where(core_mask, stabilized, gamma_adjusted).astype(np.float32)
+        stabilized = np.where(stabilized > 0.96, 1.0, stabilized).astype(np.float32)
+        return np.clip(stabilized, 0.0, 1.0).astype(np.float32)
 
 
 def _ms(t0: float, t1: float) -> float:

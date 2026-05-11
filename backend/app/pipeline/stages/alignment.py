@@ -128,18 +128,26 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
         # can over-constrain TPS and cause visible cheek artifacts.
         mouth_center = (mouth_left + mouth_right) / 2.0
         left_side = np.array(
-            [x1 + 0.12 * face_w, y1 + 0.70 * face_h], dtype=np.float32
+            [x1 + 0.10 * face_w, y1 + 0.76 * face_h], dtype=np.float32
         )
         right_side = np.array(
-            [x2 - 0.12 * face_w, y1 + 0.70 * face_h], dtype=np.float32
+            [x2 - 0.10 * face_w, y1 + 0.76 * face_h], dtype=np.float32
         )
         left_cheek = np.array(
-            [x1 + 0.20 * face_w, y1 + 0.58 * face_h], dtype=np.float32
+            [x1 + 0.20 * face_w, y1 + 0.62 * face_h], dtype=np.float32
         )
         right_cheek = np.array(
-            [x2 - 0.20 * face_w, y1 + 0.58 * face_h], dtype=np.float32
+            [x2 - 0.20 * face_w, y1 + 0.62 * face_h], dtype=np.float32
         )
-        lower_center = np.array([mouth_center[0], y1 + face_h * 0.88], dtype=np.float32)
+        # Add jawline-following constraints so side hair wraps the lower ear/jaw
+        # contour instead of floating off the cheek on tighter crops.
+        left_jaw = np.array(
+            [x1 + 0.16 * face_w, y1 + 0.86 * face_h], dtype=np.float32
+        )
+        right_jaw = np.array(
+            [x2 - 0.16 * face_w, y1 + 0.86 * face_h], dtype=np.float32
+        )
+        lower_center = np.array([mouth_center[0], y1 + face_h * 0.96], dtype=np.float32)
 
         anchors = np.vstack(
             [
@@ -152,6 +160,8 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
                 right_side,
                 left_cheek,
                 right_cheek,
+                left_jaw,
+                right_jaw,
                 lower_center,
             ]
         ).astype(np.float32)

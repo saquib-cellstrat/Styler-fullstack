@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     contact_shadow_opacity: float = 0.15
     contact_shadow_blur_sigma: float = 5.0
     hair_alpha_close_kernel: int = 5
-    hair_alpha_core_min_opacity: float = 0.72
+    hair_alpha_core_min_opacity: float = 1.0
     hair_alpha_edge_gamma: float = 0.9
     debug_export_enabled: bool = False
     debug_export_dir: str = "debug/exports"

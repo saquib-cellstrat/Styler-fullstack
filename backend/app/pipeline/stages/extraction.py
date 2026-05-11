@@ -114,6 +114,8 @@ class ModNetExtractionStage(AbstractPipelineStage):
         closed_f = closed.astype(np.float32) / 255.0
         stabilized = np.maximum(alpha, closed_f)
 
+        # Erode the solid-hair mask to get interior-only pixels; the outer
+        # ring of edge pixels keeps its natural soft value for smooth blending.
         core_mask = cv2.erode((stabilized > 0.35).astype(np.uint8), kernel, iterations=1) > 0
         core_floor = float(self._settings.hair_alpha_core_min_opacity)
         stabilized = np.where(core_mask, np.maximum(stabilized, core_floor), stabilized)

@@ -11,6 +11,7 @@ from app.pipeline.contracts import HairRegions
 from app.pipeline.context import ProcessingContext
 from app.pipeline.master import MasterPipeline
 from app.pipeline.stages.warping import TpsWarpStage
+from app.pipeline.stages.warping_mls import MlsWarpStage
 
 
 class _StubPipeline:
@@ -95,6 +96,9 @@ def test_tps_warp_identity_shape() -> None:
 
     class _Settings:
         tps_regularization = 1e-3
+        enable_region_aware_tps = False
+        debug_export_enabled = False
+        debug_export_dir = "debug/exports"
 
     stage = TpsWarpStage(models=_NoopModels(), settings=_Settings())
     anchor = np.array(
@@ -122,6 +126,44 @@ def test_tps_warp_identity_shape() -> None:
             long_strands=np.ones((80, 80), dtype=np.float32),
             shoulder_overlap=np.zeros((80, 80), dtype=np.float32),
         ),
+    )
+    result = stage.process(context)
+    assert result.warped_hair_rgb is not None
+    assert result.warped_hair_alpha is not None
+    assert result.warped_hair_rgb.shape[:2] == base_rgb.shape[:2]
+
+
+def test_mls_warp_identity_shape() -> None:
+    class _NoopModels:
+        pass
+
+    class _Settings:
+        enable_region_aware_tps = False
+        debug_export_enabled = False
+        debug_export_dir = "debug/exports"
+        mls_map_grid_long_edge = 24
+        mls_inverse_max_iterations = 12
+        mls_weight_alpha = 1.0
+        mls_weight_eps = 2.0
+
+    stage = MlsWarpStage(models=_NoopModels(), settings=_Settings())
+    anchor = np.array(
+        [[30, 20], [60, 20], [45, 10], [45, 40], [30, 40], [60, 40], [45, 55]],
+        dtype=np.float32,
+    )
+    rgba = np.zeros((80, 80, 4), dtype=np.uint8)
+    rgba[20:60, 30:60, :3] = 255
+    alpha = np.zeros((80, 80), dtype=np.float32)
+    alpha[20:60, 30:60] = 1.0
+    base_rgb = np.zeros((80, 80, 3), dtype=np.uint8)
+    context = ProcessingContext(
+        base_image_bytes=b"",
+        donor_image_bytes=b"",
+        base_rgb=base_rgb,
+        donor_hair_rgba=rgba,
+        donor_hair_alpha=alpha,
+        base_scalp_anchors=anchor,
+        donor_scalp_anchors=anchor.copy(),
     )
     result = stage.process(context)
     assert result.warped_hair_rgb is not None

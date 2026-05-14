@@ -111,6 +111,15 @@ def _build_stage_details(
     selected_implementations: dict[str, str],
     settings: Settings,
 ) -> list[dict[str, object]]:
+    sel_warp = selected_implementations.get("warp", settings.pipeline_warp_impl)
+    if sel_warp == "mls":
+        warp_models = (
+            ["mls_rigid_inverse", "region_anchor_blend"]
+            if settings.enable_region_aware_tps
+            else ["mls_rigid_inverse"]
+        )
+    else:
+        warp_models = ["region_tps_math"] if settings.enable_region_aware_tps else ["tps_math"]
     model_map = {
         "alignment": ["retinaface"],
         "extraction": (
@@ -118,7 +127,7 @@ def _build_stage_details(
             if settings.refine_hair_with_portrait_matte
             else ["face_parser"]
         ),
-        "warp": ["region_tps_math"] if settings.enable_region_aware_tps else ["tps_math"],
+        "warp": warp_models,
         "harmonization": ["lab_color_transfer"],
         "blending": (
             ["laplacian_blend", "depth_estimator"]

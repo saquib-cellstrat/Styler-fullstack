@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { AlertCircle, ImagePlus, RefreshCw, Sparkles, Upload, X } from "lucide-react";
+import { AlertCircle, Download, ImagePlus, RefreshCw, Sparkles, Upload, X } from "lucide-react";
 import { Section } from "@/components/layout/section";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,24 @@ type UploadState = {
 
 const ACCEPTED_TYPES = "image/jpeg,image/jpg,image/png,image/webp";
 const EMPTY_STAGE_DETAILS: StageTelemetry[] = [];
+const DEFAULT_BASE_IMAGE_PATH = "/bald-image.png";
+const DEFAULT_BASE_IMAGE_FILE = "bald-image.png";
+
+function revokePreviewUrl(url: string | null) {
+  if (url?.startsWith("blob:")) {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function fetchDefaultBaseFile(): Promise<File> {
+  const response = await fetch(DEFAULT_BASE_IMAGE_PATH);
+  if (!response.ok) {
+    throw new Error(`Could not load default base image (${response.status}).`);
+  }
+  const blob = await response.blob();
+  const type = blob.type || "image/png";
+  return new File([blob], DEFAULT_BASE_IMAGE_FILE, { type });
+}
 
 function formatFileMeta(file: File | null): string {
   if (!file) {
@@ -26,8 +44,90 @@ function formatFileMeta(file: File | null): string {
   return `${file.name} (${sizeMb} MB)`;
 }
 
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+      reject(new Error("Could not build collage image."));
+    }, "image/png");
+  });
+}
+
+/** One row: base | donor | result, each fitted inside the same cell size. */
+async function buildHairSwapCollagePng(
+  baseFile: File,
+  donorFile: File,
+  resultBlob: Blob,
+): Promise<Blob> {
+  let baseBm: ImageBitmap;
+  let donorBm: ImageBitmap;
+  let resultBm: ImageBitmap;
+  try {
+    [baseBm, donorBm, resultBm] = await Promise.all([
+      createImageBitmap(baseFile),
+      createImageBitmap(donorFile),
+      createImageBitmap(resultBlob),
+    ]);
+  } catch {
+    throw new Error("Could not decode one of the images for the collage.");
+  }
+
+  try {
+    const gap = 24;
+    const pad = 24;
+    const colW = 720;
+    const rowH = 900;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = pad * 2 + colW * 3 + gap * 2;
+    canvas.height = pad * 2 + rowH;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Canvas is not available.");
+    }
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const panels: ImageBitmap[] = [baseBm, donorBm, resultBm];
+    for (let i = 0; i < panels.length; i += 1) {
+      const img = panels[i];
+      const x0 = pad + i * (colW + gap);
+      const scale = Math.min(colW / img.width, rowH / img.height);
+      const dw = img.width * scale;
+      const dh = img.height * scale;
+      const dx = x0 + (colW - dw) / 2;
+      const dy = pad + (rowH - dh) / 2;
+      ctx.drawImage(img, dx, dy, dw, dh);
+    }
+
+    return await canvasToPngBlob(canvas);
+  } finally {
+    baseBm.close();
+    donorBm.close();
+    resultBm.close();
+  }
+}
+
 export default function SwapPage() {
   const [base, setBase] = useState<UploadState>({ file: null, previewUrl: null });
+  const [defaultBaseError, setDefaultBaseError] = useState<string | null>(null);
   const [donor, setDonor] = useState<UploadState>({ file: null, previewUrl: null });
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -35,6 +135,7 @@ export default function SwapPage() {
   const [stageDetails, setStageDetails] = useState<StageTelemetry[]>(EMPTY_STAGE_DETAILS);
   const [totalMs, setTotalMs] = useState<number | null>(null);
   const [viewerImage, setViewerImage] = useState<{ src: string; alt: string } | null>(null);
+  const [isDownloadingCollage, setIsDownloadingCollage] = useState(false);
 
   const canSubmit = useMemo(() => Boolean(base.file && donor.file && !isSubmitting), [
     base.file,
@@ -42,24 +143,44 @@ export default function SwapPage() {
     isSubmitting,
   ]);
 
+  const canDownloadCollage = useMemo(
+    () => Boolean(base.file && donor.file && resultUrl && !isDownloadingCollage && !isSubmitting),
+    [base.file, donor.file, resultUrl, isDownloadingCollage, isSubmitting],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setDefaultBaseError(null);
+    fetchDefaultBaseFile()
+      .then((file) => {
+        if (cancelled) return;
+        setBase({
+          file,
+          previewUrl: DEFAULT_BASE_IMAGE_PATH,
+        });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Could not load default base image.";
+        setDefaultBaseError(message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
-      if (base.previewUrl) {
-        URL.revokeObjectURL(base.previewUrl);
-      }
-      if (donor.previewUrl) {
-        URL.revokeObjectURL(donor.previewUrl);
-      }
-      if (resultUrl) {
-        URL.revokeObjectURL(resultUrl);
-      }
+      revokePreviewUrl(base.previewUrl);
+      revokePreviewUrl(donor.previewUrl);
+      revokePreviewUrl(resultUrl);
     };
   }, [base.previewUrl, donor.previewUrl, resultUrl]);
 
   function handleFileChange(field: UploadField, file: File | null) {
     setErrorMessage(null);
     if (resultUrl) {
-      URL.revokeObjectURL(resultUrl);
+      revokePreviewUrl(resultUrl);
       setResultUrl(null);
     }
     setStageDetails(EMPTY_STAGE_DETAILS);
@@ -71,16 +192,25 @@ export default function SwapPage() {
     };
 
     if (field === "base") {
-      if (base.previewUrl) {
-        URL.revokeObjectURL(base.previewUrl);
+      revokePreviewUrl(base.previewUrl);
+      if (!file) {
+        void fetchDefaultBaseFile()
+          .then((f) => {
+            setDefaultBaseError(null);
+            setBase({ file: f, previewUrl: DEFAULT_BASE_IMAGE_PATH });
+          })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : "Could not load default base image.";
+            setDefaultBaseError(message);
+            setBase({ file: null, previewUrl: null });
+          });
+        return;
       }
-      setBase(nextState);
+      setBase({ file, previewUrl: URL.createObjectURL(file) });
       return;
     }
 
-    if (donor.previewUrl) {
-      URL.revokeObjectURL(donor.previewUrl);
-    }
+    revokePreviewUrl(donor.previewUrl);
     setDonor(nextState);
   }
 
@@ -89,7 +219,7 @@ export default function SwapPage() {
     setErrorMessage(null);
 
     if (!base.file || !donor.file) {
-      setErrorMessage("Please choose both a base image and a donor image.");
+      setErrorMessage("Please choose a donor image. The default base should load automatically.");
       return;
     }
 
@@ -98,7 +228,7 @@ export default function SwapPage() {
     try {
       const swapResult = await swapHair({ baseImage: base.file, donorImage: donor.file });
       if (resultUrl) {
-        URL.revokeObjectURL(resultUrl);
+        revokePreviewUrl(resultUrl);
       }
       setResultUrl(URL.createObjectURL(swapResult.imageBlob));
       setStageDetails(swapResult.stageDetails);
@@ -114,22 +244,45 @@ export default function SwapPage() {
     }
   }
 
-  function resetAll() {
+  async function resetAll() {
     setErrorMessage(null);
-    if (base.previewUrl) {
-      URL.revokeObjectURL(base.previewUrl);
-    }
-    if (donor.previewUrl) {
-      URL.revokeObjectURL(donor.previewUrl);
-    }
-    if (resultUrl) {
-      URL.revokeObjectURL(resultUrl);
-    }
-    setBase({ file: null, previewUrl: null });
+    setDefaultBaseError(null);
+    revokePreviewUrl(base.previewUrl);
+    revokePreviewUrl(donor.previewUrl);
+    revokePreviewUrl(resultUrl);
     setDonor({ file: null, previewUrl: null });
     setResultUrl(null);
     setStageDetails(EMPTY_STAGE_DETAILS);
     setTotalMs(null);
+    setBase({ file: null, previewUrl: null });
+    try {
+      const file = await fetchDefaultBaseFile();
+      setBase({ file, previewUrl: DEFAULT_BASE_IMAGE_PATH });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Could not load default base image.";
+      setDefaultBaseError(message);
+    }
+  }
+
+  async function downloadCollage() {
+    if (!base.file || !donor.file || !resultUrl) {
+      return;
+    }
+    setIsDownloadingCollage(true);
+    try {
+      const resultResponse = await fetch(resultUrl);
+      if (!resultResponse.ok) {
+        throw new Error("Could not read the swap result for the collage.");
+      }
+      const resultBlob = await resultResponse.blob();
+      const collageBlob = await buildHairSwapCollagePng(base.file, donor.file, resultBlob);
+      downloadBlob(collageBlob, "hair-swap-collage.png");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not create collage.";
+      setErrorMessage(message);
+    } finally {
+      setIsDownloadingCollage(false);
+    }
   }
 
   return (
@@ -142,10 +295,17 @@ export default function SwapPage() {
           </p>
           <h1 className="font-display text-4xl leading-tight md:text-5xl">Swap Hair</h1>
           <p className="max-w-3xl text-muted-foreground">
-            Upload a base photo and a donor photo. The model returns a single PNG with the donor
-            hair blended onto the base image.
+            The default base is the studio bald reference. Upload a donor photo to run a swap, or
+            replace the base with your own image.
           </p>
         </header>
+
+        {defaultBaseError ? (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+            <p className="text-sm">{defaultBaseError}</p>
+          </div>
+        ) : null}
 
         <form onSubmit={onSubmit} className="grid gap-6 lg:grid-cols-2">
           <div className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -163,9 +323,9 @@ export default function SwapPage() {
               <button
                 type="button"
                 className="block w-full text-left"
-                onClick={() => setViewerImage({ src: base.previewUrl, alt: "Base preview" })}
+                onClick={() => setViewerImage({ src: base.previewUrl as string, alt: "Base preview" })}
               >
-                <ImagePreview src={base.previewUrl} alt="Base preview" fit="cover" />
+                <ImagePreview src={base.previewUrl as string} alt="Base preview" fit="cover" />
               </button>
             ) : (
               <div className="aspect-[4/3] overflow-hidden rounded-lg border border-border bg-muted/40">
@@ -192,9 +352,11 @@ export default function SwapPage() {
               <button
                 type="button"
                 className="block w-full text-left"
-                onClick={() => setViewerImage({ src: donor.previewUrl, alt: "Donor preview" })}
+                onClick={() =>
+                  setViewerImage({ src: donor.previewUrl as string, alt: "Donor preview" })
+                }
               >
-                <ImagePreview src={donor.previewUrl} alt="Donor preview" fit="cover" />
+                <ImagePreview src={donor.previewUrl as string} alt="Donor preview" fit="cover" />
               </button>
             ) : (
               <div className="aspect-[4/3] overflow-hidden rounded-lg border border-border bg-muted/40">
@@ -214,6 +376,16 @@ export default function SwapPage() {
             <Button type="button" variant="secondary" onClick={resetAll} disabled={isSubmitting}>
               <RefreshCw className="h-4 w-4" />
               Reset
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void downloadCollage()}
+              disabled={!canDownloadCollage}
+              title="Save one image: base, donor, and result side by side"
+            >
+              <Download className="h-4 w-4" />
+              {isDownloadingCollage ? "Building…" : "Download collage"}
             </Button>
           </div>
         </form>

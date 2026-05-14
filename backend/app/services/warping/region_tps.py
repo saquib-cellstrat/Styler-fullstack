@@ -8,15 +8,13 @@ from app.pipeline.contracts import HairRegions, WarpPlan
 
 
 class RegionAwareTpsWarper:
-    def build_plan(
+    def weighted_anchor_targets(
         self,
         source_points: NDArray[np.float32],
         target_points: NDArray[np.float32],
         regions: HairRegions,
-        output_shape: tuple[int, int],
-        regularization: float,
-    ) -> WarpPlan:
-        h, w = output_shape
+    ) -> tuple[NDArray[np.float32], NDArray[np.float32], list[str], NDArray[np.float32]]:
+        """Blend each anchor toward donor (stiff) or base (soft) without building TPS."""
         region_ids = self._region_labels(source_points.shape[0])
         stiffness_lookup = {
             "roots": 0.95,
@@ -27,9 +25,22 @@ class RegionAwareTpsWarper:
             "shoulder_overlap": 0.5,
         }
         stiffness = np.asarray([stiffness_lookup.get(name, 0.6) for name in region_ids], dtype=np.float32)
-        weighted_targets = source_points * stiffness[:, None] + target_points * (1.0 - stiffness[:, None])
+        blended = source_points * stiffness[:, None] + target_points * (1.0 - stiffness[:, None])
+        return blended.astype(np.float32), self._stiffness_map(regions), region_ids, stiffness
+
+    def build_plan(
+        self,
+        source_points: NDArray[np.float32],
+        target_points: NDArray[np.float32],
+        regions: HairRegions,
+        output_shape: tuple[int, int],
+        regularization: float,
+    ) -> WarpPlan:
+        h, w = output_shape
+        weighted_targets, stiffness_map, region_ids, stiffness = self.weighted_anchor_targets(
+            source_points, target_points, regions
+        )
         map_x, map_y = self._build_tps_maps(source_points, weighted_targets, output_shape, regularization)
-        stiffness_map = self._stiffness_map(regions)
         return WarpPlan(
             source_points=source_points.astype(np.float32),
             target_points=weighted_targets.astype(np.float32),

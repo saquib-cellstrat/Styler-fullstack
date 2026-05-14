@@ -7,6 +7,7 @@ from app.pipeline.stages.blending import LaplacianBlendStage
 from app.pipeline.stages.extraction import ModNetExtractionStage
 from app.pipeline.stages.harmonization import LabColorTransferStage
 from app.pipeline.stages.warping import TpsWarpStage
+from app.pipeline.stages.warping_mls import MlsWarpStage
 
 
 def build_default_registry() -> PipelineRegistry:
@@ -14,6 +15,7 @@ def build_default_registry() -> PipelineRegistry:
     registry.register("alignment", "retinaface", RetinaFaceAlignmentStage)
     registry.register("extraction", "modnet", ModNetExtractionStage)
     registry.register("warp", "tps", TpsWarpStage)
+    registry.register("warp", "mls", MlsWarpStage)
     registry.register("harmonization", "lab_transfer", LabColorTransferStage)
     registry.register("blending", "laplacian", LaplacianBlendStage)
     return registry

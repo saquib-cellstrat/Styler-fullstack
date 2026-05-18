@@ -100,18 +100,23 @@ class Settings(BaseSettings):
     # Pipeline implementation defaults (swappable via registry + API overrides)
     pipeline_alignment_impl: str = "retinaface"
     pipeline_extraction_impl: str = "modnet"
-    pipeline_warp_impl: str = "tps"
+    pipeline_warp_impl: str = "tps"  # "tps" | "mls"
     pipeline_harmonization_impl: str = "lab_transfer"
     pipeline_blending_impl: str = "laplacian"
 
     # Warp and blending quality controls
     tps_regularization: float = 1e-3
     tps_grid_size: int = 12
+    # Rigid MLS warp (pipeline_warp_impl="mls"); coarse grid + fixed-point inverse
+    mls_map_grid_long_edge: int = 48
+    mls_inverse_max_iterations: int = 12
+    mls_weight_alpha: float = 1.0
+    mls_weight_eps: float = 2.0
     laplacian_pyramid_levels: int = 4
     contact_shadow_opacity: float = 0.15
     contact_shadow_blur_sigma: float = 5.0
     hair_alpha_close_kernel: int = 5
-    hair_alpha_core_min_opacity: float = 0.72
+    hair_alpha_core_min_opacity: float = 1.0
     hair_alpha_edge_gamma: float = 0.9
     debug_export_enabled: bool = False
     debug_export_dir: str = "debug/exports"

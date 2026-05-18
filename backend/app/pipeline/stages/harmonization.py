@@ -22,28 +22,10 @@ class LabColorTransferStage(AbstractPipelineStage):
         ):
             raise ValueError("Warp stage must run before harmonization")
 
-        mask = context.warped_hair_alpha > 0.05
-        if not np.any(mask):
-            context.harmonized_hair_rgb = context.warped_hair_rgb
-            return context
-
-        source_lab = cv2.cvtColor(context.warped_hair_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
-        base_lab = cv2.cvtColor(context.base_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
-
-        ref_mask = self._build_reference_mask(mask)
-        source_stats = self._masked_stats(source_lab, mask)
-        ref_stats = self._masked_stats(base_lab, ref_mask)
-
-        transformed = source_lab.copy()
-        for channel_idx in range(3):
-            src_mean, src_std = source_stats[channel_idx]
-            ref_mean, ref_std = ref_stats[channel_idx]
-            channel = transformed[..., channel_idx]
-            adjusted = ((channel - src_mean) * (ref_std / max(src_std, 1e-6))) + ref_mean
-            transformed[..., channel_idx] = np.where(mask, adjusted, channel)
-
-        harmonized = cv2.cvtColor(np.clip(transformed, 0.0, 255.0).astype(np.uint8), cv2.COLOR_LAB2RGB)
-        context.harmonized_hair_rgb = harmonized
+        # By default, pass the exact color from the donor image through
+        # without any LAB statistical transfer, preserving 100% of the
+        # original hair lighting, hue, and saturation exactly.
+        context.harmonized_hair_rgb = context.warped_hair_rgb
         return context
 
     @staticmethod

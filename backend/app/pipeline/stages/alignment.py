@@ -113,41 +113,47 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
         )
         local_up = rot @ up
 
-        # Skull-aware anchor placement: combine eye distance + detected face box.
-        scalp_lift = max(0.52 * eye_dist, 0.28 * face_h)
-        crown = eye_mid + local_up * scalp_lift
-        temple_lift = max(0.20 * eye_dist, 0.10 * face_h)
-        left_temple = np.array(
-            [x1 + 0.16 * face_w, left_eye[1]], dtype=np.float32
-        ) + local_up * temple_lift
-        right_temple = np.array(
-            [x2 - 0.16 * face_w, right_eye[1]], dtype=np.float32
-        ) + local_up * temple_lift
-        fringe_center = eye_mid + local_up * max(0.24 * eye_dist, 0.12 * face_h)
-        # Keep lower anchors soft and landmark-driven; hard jaw/chin anchors
-        # can over-constrain TPS and cause visible cheek artifacts.
+        # Skull-aware anchor placement: yaw-adaptive landmark-driven.
+        # This uses the bounding box (x1, x2) to determine the true left/right
+        # extent of the face, which perfectly adapts to yaw (turned faces) 
+        # while using face_vert to prevent vertical elongation.
+        right_dir = eye_vec / eye_dist
         mouth_center = (mouth_left + mouth_right) / 2.0
-        left_side = np.array(
-            [x1 + 0.10 * face_w, y1 + 0.76 * face_h], dtype=np.float32
-        )
-        right_side = np.array(
-            [x2 - 0.10 * face_w, y1 + 0.76 * face_h], dtype=np.float32
-        )
-        left_cheek = np.array(
-            [x1 + 0.20 * face_w, y1 + 0.62 * face_h], dtype=np.float32
-        )
-        right_cheek = np.array(
-            [x2 - 0.20 * face_w, y1 + 0.62 * face_h], dtype=np.float32
-        )
-        # Add jawline-following constraints so side hair wraps the lower ear/jaw
-        # contour instead of floating off the cheek on tighter crops.
-        left_jaw = np.array(
-            [x1 + 0.16 * face_w, y1 + 0.86 * face_h], dtype=np.float32
-        )
-        right_jaw = np.array(
-            [x2 - 0.16 * face_w, y1 + 0.86 * face_h], dtype=np.float32
-        )
-        lower_center = np.array([mouth_center[0], y1 + face_h * 0.96], dtype=np.float32)
+        face_vert = float(np.linalg.norm(mouth_center - eye_mid)) or 1.0
+
+        pad_left = max(0.0, float(left_eye[0] - x1))
+        pad_right = max(0.0, float(x2 - right_eye[0]))
+        # Fallback if bounding box is tight or face is highly cropped
+        pad_left = max(pad_left, 0.5 * eye_dist)
+        pad_right = max(pad_right, 0.5 * eye_dist)
+
+        # Crown: prevents elongation by using stable vertical face distance
+        crown = eye_mid + local_up * (1.6 * face_vert)
+        fringe_center = eye_mid + local_up * (0.6 * face_vert)
+
+        # Temples
+        left_temple = left_eye - right_dir * (pad_left * 0.85) + local_up * (0.3 * face_vert)
+        right_temple = right_eye + right_dir * (pad_right * 0.85) + local_up * (0.3 * face_vert)
+
+        # Ears/Sides - sit on the bounding box edge to prevent inward squeezing
+        left_side = left_eye - right_dir * (pad_left * 1.0) - local_up * (0.1 * face_vert)
+        right_side = right_eye + right_dir * (pad_right * 1.0) - local_up * (0.1 * face_vert)
+
+        # Cheeks - gently taper inward
+        left_cheek = left_eye - right_dir * (pad_left * 0.9) - local_up * (0.6 * face_vert)
+        right_cheek = right_eye + right_dir * (pad_right * 0.9) - local_up * (0.6 * face_vert)
+
+        # Jaw - wider than before to ensure hair doesn't bleed onto the mouth/nose
+        left_jaw = left_eye - right_dir * (pad_left * 0.8) - local_up * (1.1 * face_vert)
+        right_jaw = right_eye + right_dir * (pad_right * 0.8) - local_up * (1.1 * face_vert)
+
+        # Chin
+        lower_center = mouth_center - local_up * (0.4 * face_vert)
+
+        # Shoulders / Neck (Prevents long hair from being stripped/squashed at the bottom)
+        left_shoulder = left_eye - right_dir * (pad_left * 1.4) - local_up * (2.5 * face_vert)
+        right_shoulder = right_eye + right_dir * (pad_right * 1.4) - local_up * (2.5 * face_vert)
+        bottom_center = mouth_center - local_up * (2.5 * face_vert)
 
         anchors = np.vstack(
             [
@@ -163,6 +169,9 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
                 left_jaw,
                 right_jaw,
                 lower_center,
+                left_shoulder,
+                right_shoulder,
+                bottom_center,
             ]
         ).astype(np.float32)
         if canonical_anchors is not None and canonical_anchors.size > 0:

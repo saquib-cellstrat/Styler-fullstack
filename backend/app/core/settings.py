@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     face_crop_for_parsing: bool = True
     # Padding multipliers relative to the detected face box.
     face_crop_pad_top: float = 1.6
-    face_crop_pad_bottom: float = 0.4
-    face_crop_pad_horizontal: float = 0.7
+    face_crop_pad_bottom: float = 1.0
+    face_crop_pad_horizontal: float = 0.8
 
     # Output trimming: crop the returned RGBA to the hair bounding box and
     # zero out RGB where alpha is fully transparent. Both reduce PNG size.
@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     dense_landmark_backend: str = "heuristic68"
     dense_landmark_onnx_filename: str = "dense_landmarks.onnx"
     depth_onnx_filename: str = "depth_small.onnx"
-    enable_experimental_geometry: bool = False
+    enable_experimental_geometry: bool = True
     enable_region_aware_tps: bool = False
     enable_depth_occlusion: bool = False
 

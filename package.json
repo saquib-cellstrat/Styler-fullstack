@@ -1,0 +1,7 @@
+{
+  "name": "styler-fullstack",
+  "private": true,
+  "scripts": {
+    "dev": "bun scripts/dev.mjs"
+  }
+}

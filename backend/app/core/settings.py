@@ -115,6 +115,14 @@ class Settings(BaseSettings):
     laplacian_pyramid_levels: int = 4
     contact_shadow_opacity: float = 0.15
     contact_shadow_blur_sigma: float = 5.0
+    harmonization_alpha_threshold: float = 0.12
+    harmonization_ring_kernel: int = 31
+    harmonization_luma_strength: float = 0.42
+    harmonization_contrast_strength: float = 0.22
+    harmonization_chroma_strength: float = 0.08
+    harmonization_max_luma_shift: float = 22.0
+    harmonization_max_chroma_shift: float = 7.0
+    harmonization_min_pixels: int = 64
     hair_alpha_close_kernel: int = 5
     hair_alpha_core_min_opacity: float = 1.0
     hair_alpha_edge_gamma: float = 0.9

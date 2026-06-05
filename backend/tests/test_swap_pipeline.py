@@ -10,6 +10,8 @@ from app.pipeline.builder import build_default_registry
 from app.pipeline.contracts import HairRegions
 from app.pipeline.context import ProcessingContext
 from app.pipeline.master import MasterPipeline
+from app.pipeline.stages.blending import LaplacianBlendStage
+from app.pipeline.stages.harmonization import LabColorTransferStage
 from app.pipeline.stages.warping import TpsWarpStage
 from app.pipeline.stages.warping_mls import MlsWarpStage
 
@@ -169,3 +171,49 @@ def test_mls_warp_identity_shape() -> None:
     assert result.warped_hair_rgb is not None
     assert result.warped_hair_alpha is not None
     assert result.warped_hair_rgb.shape[:2] == base_rgb.shape[:2]
+
+
+def test_harmonization_moves_hair_luminance_toward_base_reference() -> None:
+    class _NoopModels:
+        pass
+
+    class _Settings:
+        harmonization_alpha_threshold = 0.12
+        harmonization_ring_kernel = 9
+        harmonization_luma_strength = 1.0
+        harmonization_contrast_strength = 0.0
+        harmonization_chroma_strength = 0.0
+        harmonization_max_luma_shift = 80.0
+        harmonization_max_chroma_shift = 0.0
+        harmonization_min_pixels = 16
+
+    base_rgb = np.full((64, 64, 3), 70, dtype=np.uint8)
+    hair_rgb = np.full((64, 64, 3), 220, dtype=np.uint8)
+    alpha = np.zeros((64, 64), dtype=np.float32)
+    alpha[20:44, 20:44] = 1.0
+    context = ProcessingContext(
+        base_image_bytes=b"",
+        donor_image_bytes=b"",
+        base_rgb=base_rgb,
+        warped_hair_rgb=hair_rgb,
+        warped_hair_alpha=alpha,
+    )
+
+    result = LabColorTransferStage(_NoopModels(), _Settings()).process(context)
+
+    assert result.harmonized_hair_rgb is not None
+    original_mean = float(hair_rgb[alpha > 0.5].mean())
+    harmonized_mean = float(result.harmonized_hair_rgb[alpha > 0.5].mean())
+    assert harmonized_mean < original_mean
+
+
+def test_blending_solidifies_transparent_edge_rgb() -> None:
+    rgb = np.zeros((32, 32, 3), dtype=np.uint8)
+    rgb[12:20, 12:20] = np.array([180, 60, 40], dtype=np.uint8)
+    alpha = np.zeros((32, 32), dtype=np.float32)
+    alpha[12:20, 12:20] = 1.0
+    alpha[10:22, 10:22] = np.maximum(alpha[10:22, 10:22], 0.10)
+
+    filled = LaplacianBlendStage._solidify_edge_rgb(rgb, alpha)
+
+    assert int(filled[10, 16].sum()) > 0

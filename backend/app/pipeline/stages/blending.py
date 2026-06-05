@@ -35,8 +35,9 @@ class LaplacianBlendStage(AbstractPipelineStage):
             else context.warped_hair_rgb
         )
         assert hair_rgb is not None
-        hair = hair_rgb.astype(np.float32) / 255.0
         alpha = np.clip(context.warped_hair_alpha, 0.0, 1.0).astype(np.float32)
+        hair_rgb = self._solidify_edge_rgb(hair_rgb, alpha)
+        hair = hair_rgb.astype(np.float32) / 255.0
         alpha = self._prepare_alpha(alpha)
         depth_map = self._depth.estimate(context.base_rgb) if self._settings.enable_depth_occlusion else None
         if self._settings.enable_depth_occlusion and context.donor_regions_v2 is not None:
@@ -105,8 +106,25 @@ class LaplacianBlendStage(AbstractPipelineStage):
         alpha_u8 = (alpha * 255.0).astype(np.uint8)
         alpha_u8 = cv2.medianBlur(alpha_u8, 5)
         softened = cv2.GaussianBlur(alpha_u8.astype(np.float32) / 255.0, (0, 0), sigmaX=1.0, sigmaY=1.0)
+        softened = np.maximum(softened, alpha * 0.85)
         softened = np.where(softened > 0.55, np.maximum(softened, 0.82), softened)
         return np.clip(softened, 0.0, 1.0).astype(np.float32)
+
+    @staticmethod
+    def _solidify_edge_rgb(rgb: np.ndarray, alpha: np.ndarray) -> np.ndarray:
+        alpha = np.clip(alpha, 0.0, 1.0).astype(np.float32)
+        core = alpha > 0.18
+        if not np.any(core):
+            return rgb
+
+        core_u8 = core.astype(np.uint8)
+        band = cv2.dilate(core_u8, np.ones((17, 17), dtype=np.uint8), iterations=1) > 0
+        fill_mask = np.logical_and(band, alpha <= 0.18)
+        if not np.any(fill_mask):
+            return rgb
+
+        mask_u8 = (fill_mask.astype(np.uint8) * 255).astype(np.uint8)
+        return cv2.inpaint(rgb, mask_u8, 3.0, cv2.INPAINT_TELEA).astype(np.uint8)
 
     def _contact_shadow(self, alpha: np.ndarray) -> np.ndarray:
         kernel = np.ones((9, 9), dtype=np.uint8)
@@ -120,4 +138,5 @@ class LaplacianBlendStage(AbstractPipelineStage):
             sigmaX=self._settings.contact_shadow_blur_sigma,
             sigmaY=self._settings.contact_shadow_blur_sigma,
         )
-        return np.clip(blurred * self._settings.contact_shadow_opacity, 0.0, 1.0)
+        outside_bias = np.clip(1.0 - alpha * 0.75, 0.25, 1.0)
+        return np.clip(blurred * outside_bias * self._settings.contact_shadow_opacity, 0.0, 1.0)

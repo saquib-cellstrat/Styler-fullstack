@@ -5,12 +5,6 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 First, run the development server:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
 bun dev
 ```
 
@@ -25,7 +19,7 @@ The app now includes a hair swap tool at [http://localhost:3000/swap](http://loc
 Create a `.env.local` file in `frontend/` with:
 
 ```bash
-HAIRSWAP_BACKEND_URL=http://localhost:8000
+HAIRSWAP_BACKEND_URL=http://127.0.0.1:8000
 # Optional, only when backend API key auth is enabled
 HAIRSWAP_API_KEY=
 ```

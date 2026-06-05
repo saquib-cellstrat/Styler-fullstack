@@ -1,4 +1,4 @@
-const DEFAULT_BACKEND_URL = "http://localhost:8000";
+const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
 
 function getBackendSwapUrl(): string {
   const baseUrl = process.env.HAIRSWAP_BACKEND_URL ?? DEFAULT_BACKEND_URL;

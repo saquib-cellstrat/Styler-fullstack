@@ -69,6 +69,11 @@ uv run pytest
 Extraction tests substitute MODNet and RetinaFace with deterministic
 in-process stubs and don't require any ONNX weight files on disk.
 
+## Pipeline documentation
+
+For a detailed lead-review handoff of the current `/api/v1/swap-hair`
+implementation, see [`docs/hairswap-pipeline.md`](docs/hairswap-pipeline.md).
+
 ## Project structure
 
 ```text

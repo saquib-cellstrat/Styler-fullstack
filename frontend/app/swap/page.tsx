@@ -150,7 +150,6 @@ export default function SwapPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setDefaultBaseError(null);
     fetchDefaultBaseFile()
       .then((file) => {
         if (cancelled) return;

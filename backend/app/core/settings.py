@@ -93,15 +93,21 @@ class Settings(BaseSettings):
     retinaface_land_variances: tuple[float, float] = (0.1, 0.2)
 
     # Quality gate: reject if |estimated_yaw_deg| exceeds threshold
-    max_abs_yaw_deg: float = 35.0
+    max_abs_yaw_deg: float = 50.0
     # Minimum inter-eye distance (pixels) on original image for a usable face
     min_inter_eye_fraction: float = 0.03
 
     # Pipeline implementation defaults (swappable via registry + API overrides)
     pipeline_alignment_impl: str = "retinaface"
     pipeline_extraction_impl: str = "modnet"
-    pipeline_warp_impl: str = "tps"  # "tps" | "mls"
+    pipeline_warp_impl: str = "mls"  # "tps" | "mls"
     pipeline_harmonization_impl: str = "lab_transfer"
+    # Color harmonization: re-lights the donor hair by the base-vs-donor skin
+    # illumination delta. 0.0 preserves the donor hair colour exactly; the
+    # default applies a moderate correction. chroma_ratio keeps hue/saturation
+    # shifts smaller than the luminance match so the chosen style is retained.
+    harmonization_strength: float = 0.6
+    harmonization_chroma_ratio: float = 0.5
     pipeline_blending_impl: str = "laplacian"
 
     # Warp and blending quality controls
@@ -112,17 +118,38 @@ class Settings(BaseSettings):
     mls_inverse_max_iterations: int = 12
     mls_weight_alpha: float = 1.0
     mls_weight_eps: float = 2.0
+    # Similarity MLS lets the hair body scale with the head so the donor's
+    # hair volume is preserved when base and donor face sizes differ. Rigid
+    # (False) keeps the donor's absolute scale and distorts volume on size
+    # mismatch.
+    mls_similarity: bool = True
     laplacian_pyramid_levels: int = 4
     contact_shadow_opacity: float = 0.15
     contact_shadow_blur_sigma: float = 5.0
+    # Low-alpha floor: kill the faint matte tail (donor-background haze and
+    # the feathered halo over the base background) while keeping real wisps.
+    # Alpha below `low` -> 0, ramped to unchanged at/above `high`.
+    alpha_floor_low: float = 0.10
+    alpha_floor_high: float = 0.24
+    # Edge decontamination: bleed confident hair colour into the feathered
+    # band so soft edges fade in hair tone instead of a grey/background halo.
+    enable_edge_decontamination: bool = True
+    edge_decontam_band_px: int = 10
+    # Halo crop: attenuate hair alpha by distance from the solid core so the
+    # broad backlit-matte haze over the background disappears while silhouette
+    # wisps survive. Alpha is full within core_dist px of solid hair, ramping
+    # to zero over the next falloff px.
+    halo_crop_core_dist_px: int = 8
+    halo_crop_falloff_px: int = 22
     hair_alpha_close_kernel: int = 5
     hair_alpha_core_min_opacity: float = 1.0
     hair_alpha_edge_gamma: float = 0.9
     debug_export_enabled: bool = False
     debug_export_dir: str = "debug/exports"
     export_landmarks_json: bool = False
-    dense_landmark_backend: str = "heuristic68"
+    dense_landmark_backend: str = "mediapipe"
     dense_landmark_onnx_filename: str = "dense_landmarks.onnx"
+    face_landmarker_task_filename: str = "face_landmarker.task"
     depth_onnx_filename: str = "depth_small.onnx"
     enable_experimental_geometry: bool = True
     enable_region_aware_tps: bool = False

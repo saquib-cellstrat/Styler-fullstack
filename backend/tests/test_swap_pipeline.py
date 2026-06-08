@@ -145,6 +145,7 @@ def test_mls_warp_identity_shape() -> None:
         mls_inverse_max_iterations = 12
         mls_weight_alpha = 1.0
         mls_weight_eps = 2.0
+        mls_similarity = True
 
     stage = MlsWarpStage(models=_NoopModels(), settings=_Settings())
     anchor = np.array(

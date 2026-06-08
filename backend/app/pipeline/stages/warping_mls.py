@@ -56,6 +56,7 @@ class MlsWarpStage(AbstractPipelineStage):
             max_iterations=self._settings.mls_inverse_max_iterations,
             alpha=self._settings.mls_weight_alpha,
             eps=self._settings.mls_weight_eps,
+            similarity=self._settings.mls_similarity,
         )
         context.warp_plan = None
 

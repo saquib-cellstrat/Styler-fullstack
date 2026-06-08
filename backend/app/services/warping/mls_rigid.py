@@ -1,8 +1,10 @@
-"""Rigid Moving Least Squares (Schaefer et al., 2006) backward maps for image warping.
+"""Moving Least Squares (Schaefer et al., 2006) backward maps for image warping.
 
 Donor anchors p_i map to base anchors q_i. For each base pixel u we recover a donor
-coordinate v with fixed-point inversion of the forward map f(v) = q* + R(v - p*).
-Maps are built on a coarse grid and upsampled for speed.
+coordinate v with fixed-point inversion of the forward map f(v) = q* + s R(v - p*).
+In rigid mode the scale s is fixed at 1; in similarity mode s is solved per pixel so
+regions far from the face anchors (the hair body) scale with the head instead of
+keeping the donor's original size. Maps are built on a coarse grid and upsampled.
 """
 
 from __future__ import annotations
@@ -21,13 +23,14 @@ def _weights(v: NDArray[np.float64], p: NDArray[np.float32], alpha: float, eps: 
     return np.power(d2, -alpha)
 
 
-def _rigid_mls_step(
+def _mls_step(
     u: NDArray[np.float64],
     v: NDArray[np.float64],
     p: NDArray[np.float32],
     q: NDArray[np.float32],
     alpha: float,
     eps: float,
+    similarity: bool,
 ) -> NDArray[np.float64]:
     w = _weights(v, p, alpha, eps)
     sw = float(np.sum(w)) + 1e-12
@@ -36,16 +39,21 @@ def _rigid_mls_step(
     ph = p.astype(np.float64) - p_star
     qh = q.astype(np.float64) - q_star
     m = (qh * w[:, None]).T @ ph
-    u_mat, _, vt = np.linalg.svd(m, full_matrices=True)
-    r = u_mat @ vt
-    if float(np.linalg.det(r)) < 0.0:
-        u_mat = u_mat.copy()
-        u_mat[:, 1] *= -1.0
-        r = u_mat @ vt
-    return p_star + r.T @ (u - q_star)
+    u_mat, sdiag, vt = np.linalg.svd(m, full_matrices=True)
+    d = np.eye(2)
+    if float(np.linalg.det(u_mat) * np.linalg.det(vt)) < 0.0:
+        d[1, 1] = -1.0
+    r = u_mat @ d @ vt
+    inv = r.T
+    if similarity:
+        mu = float(np.sum(w * np.sum(ph * ph, axis=1))) + 1e-12
+        s = (sdiag[0] * d[0, 0] + sdiag[1] * d[1, 1]) / mu
+        s = float(np.clip(s, 0.2, 5.0))
+        inv = inv / s
+    return p_star + inv @ (u - q_star)
 
 
-def inverse_rigid_mls_sample(
+def inverse_mls_sample(
     u: NDArray[np.float64],
     p: NDArray[np.float32],
     q: NDArray[np.float32],
@@ -53,11 +61,12 @@ def inverse_rigid_mls_sample(
     max_iterations: int,
     alpha: float,
     eps: float,
+    similarity: bool,
     tol: float = 1e-3,
 ) -> NDArray[np.float64]:
     v = u.copy()
     for _ in range(max_iterations):
-        v_new = _rigid_mls_step(u, v, p, q, alpha, eps)
+        v_new = _mls_step(u, v, p, q, alpha, eps, similarity)
         if float(np.linalg.norm(v_new - v)) < tol:
             return v_new
         v = v_new
@@ -74,11 +83,12 @@ def build_backward_rigid_mls_remap_maps(
     max_iterations: int,
     alpha: float,
     eps: float,
+    similarity: bool = True,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Return map_x, map_y for cv2.remap (destination = base, source = donor).
 
-    For each base pixel u, samples donor at v ≈ f^{-1}(u) where f is rigid MLS
-    from donor to base driven by pairs (p_i -> q_i).
+    For each base pixel u, samples donor at v ≈ f^{-1}(u) where f is rigid/similarity
+    MLS from donor to base driven by pairs (p_i -> q_i).
     """
     h, w = output_shape
     dh, dw = donor_shape
@@ -97,7 +107,10 @@ def build_backward_rigid_mls_remap_maps(
     for iy in range(gh):
         for ix in range(gw):
             u = np.array([xs[ix], ys[iy]], dtype=np.float64)
-            v = inverse_rigid_mls_sample(u, p, q, max_iterations=max_iterations, alpha=alpha, eps=eps)
+            v = inverse_mls_sample(
+                u, p, q,
+                max_iterations=max_iterations, alpha=alpha, eps=eps, similarity=similarity,
+            )
             coarse_mx[iy, ix] = float(np.clip(v[0], 0.0, float(dw - 1)))
             coarse_my[iy, ix] = float(np.clip(v[1], 0.0, float(dh - 1)))
 

@@ -1,1 +1,5 @@
 *.DS_Store
+outputs/
+test_face_landmarker.task
+__pycache__/
+*.pyc

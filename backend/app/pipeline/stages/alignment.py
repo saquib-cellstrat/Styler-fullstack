@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from app.debug.exporter import DebugExporter
@@ -9,6 +11,8 @@ from app.services.cranial_hull import CranialHullEstimator
 from app.services.extraction.quality_gate import FrontalFaceGate
 from app.services.landmarks import DenseLandmarkService
 from app.services.landmarks.debug_viz import render_landmarks_overlay
+from app.services.landmarks.head_anchors import build_head_anchors
+from app.services.landmarks.mesh_landmarker import MeshLandmarker, MeshResult
 from app.shared.image_processing import ImageProcessor
 
 
@@ -22,6 +26,11 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
         self._dense = DenseLandmarkService()
         self._hull = CranialHullEstimator()
         self._debug = DebugExporter(settings.debug_export_enabled, settings.debug_export_dir)
+        self._mesh: MeshLandmarker | None = None
+        if settings.dense_landmark_backend == "mediapipe":
+            task_path = Path(settings.model_weights_dir) / settings.face_landmarker_task_filename
+            if task_path.exists():
+                self._mesh = MeshLandmarker.get(str(task_path))
 
     def process(self, context: ProcessingContext) -> ProcessingContext:
         if context.base_rgb is None:
@@ -31,6 +40,42 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
 
         context.base_face = self._gate.evaluate(context.base_rgb)
         context.donor_face = self._gate.evaluate(context.donor_rgb)
+
+        # Prefer the dense mesh for anchors when it resolves on BOTH images,
+        # so the source/target anchor sets correspond index-for-index. If
+        # either side has no mesh, both fall back to the legacy estimator.
+        if self._mesh is not None:
+            base_mesh = self._mesh.detect(context.base_rgb)
+            donor_mesh = self._mesh.detect(context.donor_rgb)
+            if base_mesh is not None and donor_mesh is not None:
+                self._apply_mesh_anchors(context, base_mesh, donor_mesh)
+                return context
+
+        self._apply_legacy_anchors(context)
+        return context
+
+    def _apply_mesh_anchors(
+        self, context: ProcessingContext, base_mesh: MeshResult, donor_mesh: MeshResult
+    ) -> None:
+        context.base_mesh_points = base_mesh.points
+        context.donor_mesh_points = donor_mesh.points
+        context.base_scalp_anchors = build_head_anchors(
+            base_mesh.points, context.base_rgb.shape[:2]
+        )
+        context.donor_scalp_anchors = build_head_anchors(
+            donor_mesh.points, context.donor_rgb.shape[:2]
+        )
+        if self._settings.debug_export_enabled:
+            context.debug_artifacts.paths["base_landmarks"] = self._debug.write_rgb(
+                "base_landmarks",
+                render_landmarks_overlay(context.base_rgb, base_mesh.points),
+            )
+            context.debug_artifacts.paths["donor_landmarks"] = self._debug.write_rgb(
+                "donor_landmarks",
+                render_landmarks_overlay(context.donor_rgb, donor_mesh.points),
+            )
+
+    def _apply_legacy_anchors(self, context: ProcessingContext) -> None:
         canonical_base: np.ndarray | None = None
         canonical_donor: np.ndarray | None = None
         if self._settings.enable_experimental_geometry:
@@ -82,7 +127,6 @@ class RetinaFaceAlignmentStage(AbstractPipelineStage):
             self._dense.save_json(
                 context.donor_dense_landmarks, f"{self._settings.debug_export_dir}/donor_landmarks.json"
             )
-        return context
 
     @staticmethod
     def _build_scalp_anchors(

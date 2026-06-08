@@ -42,6 +42,8 @@ class ProcessingContext:
     occlusion_metadata: OcclusionMetadata | None = None
     base_dense_landmarks: DenseLandmarks | None = None
     donor_dense_landmarks: DenseLandmarks | None = None
+    base_mesh_points: PointSet | None = None
+    donor_mesh_points: PointSet | None = None
     base_cranial_hull: CranialHull | None = None
     donor_cranial_hull: CranialHull | None = None
     debug_artifacts: DebugArtifacts = field(default_factory=DebugArtifacts)

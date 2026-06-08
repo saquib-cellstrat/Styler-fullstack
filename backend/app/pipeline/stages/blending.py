@@ -36,6 +36,8 @@ class LaplacianBlendStage(AbstractPipelineStage):
         )
         assert hair_rgb is not None
         hair = hair_rgb.astype(np.float32) / 255.0
+        if self._settings.enable_edge_decontamination:
+            hair = self._decontaminate_edges(hair, context.warped_hair_alpha)
         alpha = np.clip(context.warped_hair_alpha, 0.0, 1.0).astype(np.float32)
         alpha = self._prepare_alpha(alpha)
         depth_map = self._depth.estimate(context.base_rgb) if self._settings.enable_depth_occlusion else None
@@ -99,14 +101,69 @@ class LaplacianBlendStage(AbstractPipelineStage):
             output = cv2.pyrUp(output, dstsize=size) + blended_levels[idx]
         return np.clip(output, 0.0, 1.0)
 
-    @staticmethod
-    def _prepare_alpha(alpha: np.ndarray) -> np.ndarray:
+    def _decontaminate_edges(self, hair: np.ndarray, alpha: np.ndarray) -> np.ndarray:
+        """Bleed confident hair colour into the soft edge band.
+
+        Feathered edge pixels carry a mix of true hair and the donor's
+        background, which reads as a grey halo once composited. Replacing the
+        band's colour with the nearest confident-hair colour makes the soft
+        edge fade in hair tone instead, while the alpha still does the
+        feathering.
+        """
+        a = np.clip(alpha, 0.0, 1.0).astype(np.float32)
+        core = (a > 0.7).astype(np.uint8)
+        if int(core.sum()) == 0:
+            return hair
+        band = max(1, int(self._settings.edge_decontam_band_px))
+        reach = cv2.dilate(core, np.ones((3, 3), np.uint8), iterations=band)
+        target = ((reach > 0) & (core == 0))
+        if not np.any(target):
+            return hair
+
+        filled = hair.copy()
+        known = core.astype(np.float32)
+        k = (3, 3)
+        for _ in range(band):
+            num = cv2.blur(filled * known[..., None], k)
+            den = cv2.blur(known, k)[..., None] + 1e-6
+            avg = num / den
+            grown = (cv2.dilate(known.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
+            newly = grown & (known < 0.5) & target
+            filled = np.where(newly[..., None], avg, filled)
+            known = np.where(newly, 1.0, known).astype(np.float32)
+        return np.clip(filled, 0.0, 1.0).astype(np.float32)
+
+    def _prepare_alpha(self, alpha: np.ndarray) -> np.ndarray:
         alpha = np.clip(alpha, 0.0, 1.0).astype(np.float32)
         alpha_u8 = (alpha * 255.0).astype(np.uint8)
         alpha_u8 = cv2.medianBlur(alpha_u8, 5)
         softened = cv2.GaussianBlur(alpha_u8.astype(np.float32) / 255.0, (0, 0), sigmaX=1.0, sigmaY=1.0)
         softened = np.where(softened > 0.55, np.maximum(softened, 0.82), softened)
+        # Floor the faint tail to remove the halo/background haze around hair.
+        low = self._settings.alpha_floor_low
+        high = max(self._settings.alpha_floor_high, low + 1e-3)
+        ramp = np.clip((softened - low) / (high - low), 0.0, 1.0)
+        softened = softened * ramp
+        softened = self._crop_halo(softened)
         return np.clip(softened, 0.0, 1.0).astype(np.float32)
+
+    def _crop_halo(self, alpha: np.ndarray) -> np.ndarray:
+        """Limit alpha to a band around the solid hair, killing the far haze.
+
+        A backlit donor matte spreads faint alpha well beyond the hair, which
+        shows as a wide grey cloud over the background. Real strands hug the
+        silhouette, so attenuating alpha by distance from the solid core
+        removes the cloud while keeping edge wisps intact. Short, clean styles
+        have no far haze and are unaffected.
+        """
+        core_dist = float(self._settings.halo_crop_core_dist_px)
+        falloff = max(1.0, float(self._settings.halo_crop_falloff_px))
+        solid = (alpha > 0.5).astype(np.uint8)
+        if int(solid.sum()) == 0:
+            return alpha
+        dist = cv2.distanceTransform(1 - solid, cv2.DIST_L2, 3)
+        atten = np.clip(1.0 - (dist - core_dist) / falloff, 0.0, 1.0).astype(np.float32)
+        return alpha * atten
 
     def _contact_shadow(self, alpha: np.ndarray) -> np.ndarray:
         kernel = np.ones((9, 9), dtype=np.uint8)

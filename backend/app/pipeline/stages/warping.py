@@ -106,7 +106,10 @@ class TpsWarpStage(AbstractPipelineStage):
         bottom = np.concatenate([p.T, np.zeros((3, 3), dtype=np.float64)], axis=1)
         lhs = np.concatenate([top, bottom], axis=0)
         rhs = np.concatenate([values.astype(np.float64), np.zeros(3, dtype=np.float64)])
-        return np.linalg.solve(lhs, rhs)
+        # Least-squares solve stays finite when the control points are dense
+        # or near-collinear, where a direct solve overflows.
+        solution, *_ = np.linalg.lstsq(lhs, rhs, rcond=None)
+        return solution
 
     def _evaluate_tps(
         self,
